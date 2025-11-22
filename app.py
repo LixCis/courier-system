@@ -1,0 +1,467 @@
+from flask import Flask, render_template, redirect, url_for, flash, request
+from flask_login import LoginManager, login_user, logout_user, login_required, current_user
+from functools import wraps
+from config import Config
+from models import db, User, Order, DeliveryLog
+from datetime import datetime
+import secrets
+
+app = Flask(__name__)
+app.config.from_object(Config)
+
+# Initialize extensions
+db.init_app(app)
+login_manager = LoginManager()
+login_manager.init_app(app)
+login_manager.login_view = 'login'
+login_manager.login_message = 'Please log in to access this page.'
+
+
+@login_manager.user_loader
+def load_user(user_id):
+    """Load user by ID for Flask-Login"""
+    return User.query.get(int(user_id))
+
+
+def role_required(*roles):
+    """Decorator to restrict access based on user role"""
+    def decorator(f):
+        @wraps(f)
+        def decorated_function(*args, **kwargs):
+            if not current_user.is_authenticated:
+                flash('Please log in to access this page.', 'warning')
+                return redirect(url_for('login'))
+            if current_user.role not in roles:
+                flash('You do not have permission to access this page.', 'danger')
+                return redirect(url_for('dashboard'))
+            return f(*args, **kwargs)
+        return decorated_function
+    return decorator
+
+
+# ==================== Authentication Routes ====================
+
+@app.route('/')
+def index():
+    """Landing page - redirect to dashboard if logged in"""
+    if current_user.is_authenticated:
+        return redirect(url_for('dashboard'))
+    return redirect(url_for('login'))
+
+
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    """User login"""
+    if current_user.is_authenticated:
+        return redirect(url_for('dashboard'))
+
+    if request.method == 'POST':
+        username = request.form.get('username')
+        password = request.form.get('password')
+
+        user = User.query.filter_by(username=username).first()
+
+        if user and user.check_password(password):
+            if not user.is_active:
+                flash('Your account has been deactivated.', 'danger')
+                return redirect(url_for('login'))
+
+            login_user(user)
+            flash(f'Welcome back, {user.full_name}!', 'success')
+
+            # Redirect to appropriate dashboard
+            next_page = request.args.get('next')
+            return redirect(next_page) if next_page else redirect(url_for('dashboard'))
+        else:
+            flash('Invalid username or password.', 'danger')
+
+    return render_template('login.html')
+
+
+@app.route('/logout')
+@login_required
+def logout():
+    """User logout"""
+    logout_user()
+    flash('You have been logged out successfully.', 'info')
+    return redirect(url_for('login'))
+
+
+@app.route('/dashboard')
+@login_required
+def dashboard():
+    """Route to appropriate dashboard based on user role"""
+    if current_user.role == 'admin':
+        return redirect(url_for('admin_dashboard'))
+    elif current_user.role == 'restaurant':
+        return redirect(url_for('restaurant_dashboard'))
+    elif current_user.role == 'courier':
+        return redirect(url_for('courier_dashboard'))
+    else:
+        flash('Invalid user role.', 'danger')
+        return redirect(url_for('logout'))
+
+
+# ==================== Admin Routes ====================
+
+@app.route('/admin/dashboard')
+@role_required('admin')
+def admin_dashboard():
+    """Admin dashboard with full system oversight"""
+    total_orders = Order.query.count()
+    pending_orders = Order.query.filter_by(status='pending').count()
+    active_orders = Order.query.filter(Order.status.in_(['assigned', 'picked_up', 'in_transit'])).count()
+    completed_orders = Order.query.filter_by(status='delivered').count()
+
+    total_couriers = User.query.filter_by(role='courier').count()
+    available_couriers = User.query.filter_by(role='courier', is_available=True).count()
+
+    total_restaurants = User.query.filter_by(role='restaurant').count()
+
+    # Recent orders
+    recent_orders = Order.query.order_by(Order.created_at.desc()).limit(10).all()
+
+    # Recent delivery logs
+    recent_logs = DeliveryLog.query.order_by(DeliveryLog.timestamp.desc()).limit(15).all()
+
+    return render_template('admin/dashboard.html',
+                         total_orders=total_orders,
+                         pending_orders=pending_orders,
+                         active_orders=active_orders,
+                         completed_orders=completed_orders,
+                         total_couriers=total_couriers,
+                         available_couriers=available_couriers,
+                         total_restaurants=total_restaurants,
+                         recent_orders=recent_orders,
+                         recent_logs=recent_logs)
+
+
+@app.route('/admin/orders')
+@role_required('admin')
+def admin_orders():
+    """View all orders"""
+    status_filter = request.args.get('status', 'all')
+
+    if status_filter == 'all':
+        orders = Order.query.order_by(Order.created_at.desc()).all()
+    else:
+        orders = Order.query.filter_by(status=status_filter).order_by(Order.created_at.desc()).all()
+
+    return render_template('admin/orders.html', orders=orders, status_filter=status_filter)
+
+
+@app.route('/admin/users')
+@role_required('admin')
+def admin_users():
+    """Manage users"""
+    users = User.query.order_by(User.role, User.full_name).all()
+    return render_template('admin/users.html', users=users)
+
+
+@app.route('/admin/couriers/toggle/<int:courier_id>')
+@role_required('admin')
+def admin_toggle_courier_availability(courier_id):
+    """Toggle courier availability"""
+    courier = User.query.get_or_404(courier_id)
+
+    if courier.role != 'courier':
+        flash('Invalid courier.', 'danger')
+        return redirect(url_for('admin_users'))
+
+    courier.is_available = not courier.is_available
+    db.session.commit()
+
+    status = 'available' if courier.is_available else 'unavailable'
+    flash(f'{courier.full_name} is now {status}.', 'success')
+
+    return redirect(request.referrer or url_for('admin_users'))
+
+
+# ==================== Restaurant Routes ====================
+
+@app.route('/restaurant/dashboard')
+@role_required('restaurant')
+def restaurant_dashboard():
+    """Restaurant dashboard"""
+    my_orders = Order.query.filter_by(restaurant_id=current_user.id).order_by(Order.created_at.desc()).all()
+
+    # Statistics
+    total_orders = len(my_orders)
+    pending_orders = sum(1 for o in my_orders if o.status == 'pending')
+    active_orders = sum(1 for o in my_orders if o.status in ['assigned', 'picked_up', 'in_transit'])
+    completed_orders = sum(1 for o in my_orders if o.status == 'delivered')
+
+    return render_template('restaurant/dashboard.html',
+                         orders=my_orders,
+                         total_orders=total_orders,
+                         pending_orders=pending_orders,
+                         active_orders=active_orders,
+                         completed_orders=completed_orders)
+
+
+@app.route('/restaurant/order/create', methods=['GET', 'POST'])
+@role_required('restaurant')
+def restaurant_create_order():
+    """Create a new order"""
+    if request.method == 'POST':
+        from services.assignment_algorithm import default_assignment_service
+
+        # Generate unique order number
+        order_number = f"ORD-{datetime.utcnow().strftime('%Y%m%d')}-{secrets.token_hex(4).upper()}"
+
+        # Create new order
+        order = Order(
+            order_number=order_number,
+            restaurant_id=current_user.id,
+            restaurant_name=current_user.full_name,
+            customer_name=request.form.get('customer_name'),
+            customer_phone=request.form.get('customer_phone'),
+            delivery_address=request.form.get('delivery_address'),
+            pickup_address=request.form.get('pickup_address', current_user.current_location or ''),
+            items_description=request.form.get('items_description'),
+            special_instructions=request.form.get('special_instructions'),
+            order_value=float(request.form.get('order_value', 0)),
+            status='pending'
+        )
+
+        db.session.add(order)
+        db.session.flush()  # Get order ID
+
+        # Log order creation
+        log_entry = DeliveryLog(
+            order_id=order.id,
+            event_type='order_created',
+            event_description=f'Order created by {current_user.full_name}',
+            new_status='pending',
+            user_id=current_user.id,
+            user_role='restaurant',
+            timestamp=datetime.utcnow()
+        )
+        db.session.add(log_entry)
+        db.session.commit()
+
+        # Auto-assign to courier
+        success, message, courier = default_assignment_service.auto_assign_order(order)
+
+        if success:
+            flash(f'Order {order.order_number} created and assigned to {courier.full_name}!', 'success')
+        else:
+            flash(f'Order {order.order_number} created. {message}', 'warning')
+
+        return redirect(url_for('restaurant_dashboard'))
+
+    return render_template('restaurant/create_order.html')
+
+
+@app.route('/restaurant/order/<int:order_id>')
+@role_required('restaurant')
+def restaurant_view_order(order_id):
+    """View order details"""
+    order = Order.query.get_or_404(order_id)
+
+    # Ensure restaurant can only view their own orders
+    if order.restaurant_id != current_user.id:
+        flash('You do not have permission to view this order.', 'danger')
+        return redirect(url_for('restaurant_dashboard'))
+
+    logs = DeliveryLog.query.filter_by(order_id=order.id).order_by(DeliveryLog.timestamp.desc()).all()
+
+    return render_template('restaurant/view_order.html', order=order, logs=logs)
+
+
+# ==================== Courier Routes ====================
+
+@app.route('/courier/dashboard')
+@role_required('courier')
+def courier_dashboard():
+    """Courier dashboard - only shows assigned orders"""
+    # Couriers only see their assigned orders
+    my_orders = Order.query.filter_by(courier_id=current_user.id).order_by(Order.created_at.desc()).all()
+
+    # Statistics
+    active_orders = [o for o in my_orders if o.status in ['assigned', 'picked_up', 'in_transit']]
+    completed_today = [o for o in my_orders if o.status == 'delivered' and
+                      o.delivered_at and o.delivered_at.date() == datetime.utcnow().date()]
+
+    return render_template('courier/dashboard.html',
+                         active_orders=active_orders,
+                         completed_orders=completed_today,
+                         all_orders=my_orders,
+                         is_available=current_user.is_available)
+
+
+@app.route('/courier/toggle-availability')
+@role_required('courier')
+def courier_toggle_availability():
+    """Toggle courier's own availability"""
+    current_user.is_available = not current_user.is_available
+    db.session.commit()
+
+    status = 'available' if current_user.is_available else 'unavailable'
+    flash(f'You are now {status} for new orders.', 'success')
+
+    return redirect(url_for('courier_dashboard'))
+
+
+@app.route('/courier/order/<int:order_id>/update', methods=['POST'])
+@role_required('courier')
+def courier_update_order_status(order_id):
+    """Update order status"""
+    order = Order.query.get_or_404(order_id)
+
+    # Ensure courier can only update their assigned orders
+    if order.courier_id != current_user.id:
+        flash('You do not have permission to update this order.', 'danger')
+        return redirect(url_for('courier_dashboard'))
+
+    new_status = request.form.get('status')
+    old_status = order.status
+
+    # Update status and timestamps
+    order.status = new_status
+
+    if new_status == 'picked_up' and not order.picked_up_at:
+        order.picked_up_at = datetime.utcnow()
+    elif new_status == 'in_transit' and not order.in_transit_at:
+        order.in_transit_at = datetime.utcnow()
+    elif new_status == 'delivered' and not order.delivered_at:
+        order.delivered_at = datetime.utcnow()
+
+    # Log the status change
+    log_entry = DeliveryLog(
+        order_id=order.id,
+        event_type='status_change',
+        event_description=f'Status changed from {old_status} to {new_status}',
+        old_status=old_status,
+        new_status=new_status,
+        user_id=current_user.id,
+        user_role='courier',
+        timestamp=datetime.utcnow()
+    )
+
+    db.session.add(log_entry)
+    db.session.commit()
+
+    flash(f'Order status updated to {new_status}.', 'success')
+    return redirect(url_for('courier_dashboard'))
+
+
+@app.route('/courier/order/<int:order_id>')
+@role_required('courier')
+def courier_view_order(order_id):
+    """View order details"""
+    order = Order.query.get_or_404(order_id)
+
+    # Ensure courier can only view their assigned orders
+    if order.courier_id != current_user.id:
+        flash('You do not have permission to view this order.', 'danger')
+        return redirect(url_for('courier_dashboard'))
+
+    logs = DeliveryLog.query.filter_by(order_id=order.id).order_by(DeliveryLog.timestamp.desc()).all()
+
+    return render_template('courier/view_order.html', order=order, logs=logs)
+
+
+# ==================== Error Handlers ====================
+
+@app.errorhandler(404)
+def not_found_error(error):
+    return render_template('errors/404.html'), 404
+
+
+@app.errorhandler(500)
+def internal_error(error):
+    db.session.rollback()
+    return render_template('errors/500.html'), 500
+
+
+# ==================== Database Initialization ====================
+
+@app.cli.command()
+def init_db():
+    """Initialize the database"""
+    with app.app_context():
+        db.create_all()
+        print('Database initialized!')
+
+
+@app.cli.command()
+def seed_db():
+    """Seed the database with sample data"""
+    with app.app_context():
+        # Check if data already exists
+        if User.query.first():
+            print('Database already contains data. Skipping seed.')
+            return
+
+        # Create admin user
+        admin = User(
+            username='admin',
+            email='admin@courier.com',
+            full_name='System Administrator',
+            role='admin'
+        )
+        admin.set_password('admin123')
+
+        # Create restaurant users
+        restaurant1 = User(
+            username='pizza_palace',
+            email='contact@pizzapalace.com',
+            full_name='Pizza Palace',
+            role='restaurant',
+            current_location='123 Main St, Downtown'
+        )
+        restaurant1.set_password('rest123')
+
+        restaurant2 = User(
+            username='burger_king',
+            email='info@burgerking.com',
+            full_name='Burger Kingdom',
+            role='restaurant',
+            current_location='456 Oak Ave, Midtown'
+        )
+        restaurant2.set_password('rest123')
+
+        # Create courier users
+        courier1 = User(
+            username='john_courier',
+            email='john@courier.com',
+            full_name='John Doe',
+            role='courier',
+            is_available=True
+        )
+        courier1.set_password('courier123')
+
+        courier2 = User(
+            username='jane_courier',
+            email='jane@courier.com',
+            full_name='Jane Smith',
+            role='courier',
+            is_available=True
+        )
+        courier2.set_password('courier123')
+
+        courier3 = User(
+            username='mike_courier',
+            email='mike@courier.com',
+            full_name='Mike Johnson',
+            role='courier',
+            is_available=False
+        )
+        courier3.set_password('courier123')
+
+        db.session.add_all([admin, restaurant1, restaurant2, courier1, courier2, courier3])
+        db.session.commit()
+
+        print('Database seeded successfully!')
+        print('\nLogin Credentials:')
+        print('Admin: admin / admin123')
+        print('Restaurant: pizza_palace / rest123')
+        print('Restaurant: burger_king / rest123')
+        print('Courier: john_courier / courier123')
+        print('Courier: jane_courier / courier123')
+        print('Courier: mike_courier / courier123')
+
+
+if __name__ == '__main__':
+    app.run(debug=True, port=5000)

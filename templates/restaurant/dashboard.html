@@ -1,0 +1,92 @@
+{% extends "base.html" %}
+
+{% block title %}Restaurant Dashboard{% endblock %}
+
+{% block content %}
+<div class="py-6">
+    <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+        <div class="sm:flex sm:items-center sm:justify-between">
+            <h1 class="text-2xl font-semibold text-gray-900">My Orders</h1>
+            <a href="{{ url_for('restaurant_create_order') }}" class="mt-4 sm:mt-0 inline-flex items-center rounded-md bg-green-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-green-500">
+                <svg class="-ml-0.5 mr-1.5 h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+                </svg>
+                Create New Order
+            </a>
+        </div>
+
+        <!-- Statistics -->
+        <div class="mt-6 grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-4">
+            <div class="overflow-hidden rounded-lg bg-white shadow p-5">
+                <p class="text-sm font-medium text-gray-500">Total Orders</p>
+                <p class="mt-1 text-3xl font-semibold text-gray-900">{{ total_orders }}</p>
+            </div>
+            <div class="overflow-hidden rounded-lg bg-white shadow p-5">
+                <p class="text-sm font-medium text-gray-500">Pending</p>
+                <p class="mt-1 text-3xl font-semibold text-yellow-600">{{ pending_orders }}</p>
+            </div>
+            <div class="overflow-hidden rounded-lg bg-white shadow p-5">
+                <p class="text-sm font-medium text-gray-500">In Progress</p>
+                <p class="mt-1 text-3xl font-semibold text-blue-600">{{ active_orders }}</p>
+            </div>
+            <div class="overflow-hidden rounded-lg bg-white shadow p-5">
+                <p class="text-sm font-medium text-gray-500">Completed</p>
+                <p class="mt-1 text-3xl font-semibold text-green-600">{{ completed_orders }}</p>
+            </div>
+        </div>
+
+        <!-- Orders List -->
+        <div class="mt-8">
+            <div class="bg-white shadow overflow-hidden sm:rounded-md">
+                <ul role="list" class="divide-y divide-gray-200">
+                    {% for order in orders %}
+                    <li>
+                        <a href="{{ url_for('restaurant_view_order', order_id=order.id) }}" class="block hover:bg-gray-50">
+                            <div class="px-4 py-4 sm:px-6">
+                                <div class="flex items-center justify-between">
+                                    <div class="flex-1">
+                                        <p class="text-sm font-medium text-green-600">{{ order.order_number }}</p>
+                                        <p class="text-sm text-gray-500 mt-1">Customer: {{ order.customer_name }}</p>
+                                        <p class="text-xs text-gray-400 mt-1">{{ order.delivery_address }}</p>
+                                    </div>
+                                    <div class="ml-2 flex-shrink-0">
+                                        <span class="inline-flex rounded-full px-3 py-1 text-xs font-semibold leading-5
+                                            {% if order.status == 'delivered' %}bg-green-100 text-green-800
+                                            {% elif order.status == 'pending' %}bg-yellow-100 text-yellow-800
+                                            {% elif order.status in ['assigned', 'picked_up', 'in_transit'] %}bg-blue-100 text-blue-800
+                                            {% else %}bg-gray-100 text-gray-800{% endif %}">
+                                            {{ order.status|replace('_', ' ')|title }}
+                                        </span>
+                                    </div>
+                                </div>
+                                <div class="mt-2 sm:flex sm:justify-between">
+                                    <div class="sm:flex">
+                                        <p class="flex items-center text-sm text-gray-500">
+                                            {% if order.courier_user %}
+                                                Courier: {{ order.courier_user.full_name }}
+                                            {% else %}
+                                                <span class="text-yellow-600">Waiting for courier assignment</span>
+                                            {% endif %}
+                                        </p>
+                                    </div>
+                                    <div class="mt-2 flex items-center text-sm text-gray-500 sm:mt-0">
+                                        <p>{{ order.created_at.strftime('%Y-%m-%d %H:%M') }}</p>
+                                    </div>
+                                </div>
+                            </div>
+                        </a>
+                    </li>
+                    {% else %}
+                    <li class="px-4 py-8 text-center">
+                        <p class="text-gray-500">No orders yet</p>
+                        <a href="{{ url_for('restaurant_create_order') }}" class="mt-2 inline-block text-green-600 hover:text-green-500">
+                            Create your first order
+                        </a>
+                    </li>
+                    {% endfor %}
+                </ul>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

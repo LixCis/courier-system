@@ -1,0 +1,194 @@
+{% extends "base.html" %}
+
+{% block title %}Admin Dashboard - Courier System{% endblock %}
+
+{% block content %}
+<div class="py-6">
+    <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+        <h1 class="text-2xl font-semibold text-gray-900">System Overview</h1>
+    </div>
+    <div class="mx-auto max-w-7xl px-4 sm:px-6 md:px-8">
+        <!-- Statistics -->
+        <div class="mt-4">
+            <div class="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-4">
+                <!-- Total Orders -->
+                <div class="overflow-hidden rounded-lg bg-white shadow">
+                    <div class="p-5">
+                        <div class="flex items-center">
+                            <div class="flex-shrink-0">
+                                <div class="rounded-md bg-indigo-500 p-3">
+                                    <svg class="h-6 w-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+                                    </svg>
+                                </div>
+                            </div>
+                            <div class="ml-5 w-0 flex-1">
+                                <dl>
+                                    <dt class="truncate text-sm font-medium text-gray-500">Total Orders</dt>
+                                    <dd class="text-3xl font-semibold text-gray-900">{{ total_orders }}</dd>
+                                </dl>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Pending Orders -->
+                <div class="overflow-hidden rounded-lg bg-white shadow">
+                    <div class="p-5">
+                        <div class="flex items-center">
+                            <div class="flex-shrink-0">
+                                <div class="rounded-md bg-yellow-500 p-3">
+                                    <svg class="h-6 w-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                    </svg>
+                                </div>
+                            </div>
+                            <div class="ml-5 w-0 flex-1">
+                                <dl>
+                                    <dt class="truncate text-sm font-medium text-gray-500">Pending</dt>
+                                    <dd class="text-3xl font-semibold text-gray-900">{{ pending_orders }}</dd>
+                                </dl>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Active Orders -->
+                <div class="overflow-hidden rounded-lg bg-white shadow">
+                    <div class="p-5">
+                        <div class="flex items-center">
+                            <div class="flex-shrink-0">
+                                <div class="rounded-md bg-blue-500 p-3">
+                                    <svg class="h-6 w-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
+                                    </svg>
+                                </div>
+                            </div>
+                            <div class="ml-5 w-0 flex-1">
+                                <dl>
+                                    <dt class="truncate text-sm font-medium text-gray-500">Active</dt>
+                                    <dd class="text-3xl font-semibold text-gray-900">{{ active_orders }}</dd>
+                                </dl>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Completed Orders -->
+                <div class="overflow-hidden rounded-lg bg-white shadow">
+                    <div class="p-5">
+                        <div class="flex items-center">
+                            <div class="flex-shrink-0">
+                                <div class="rounded-md bg-green-500 p-3">
+                                    <svg class="h-6 w-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                    </svg>
+                                </div>
+                            </div>
+                            <div class="ml-5 w-0 flex-1">
+                                <dl>
+                                    <dt class="truncate text-sm font-medium text-gray-500">Completed</dt>
+                                    <dd class="text-3xl font-semibold text-gray-900">{{ completed_orders }}</dd>
+                                </dl>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- User Statistics -->
+        <div class="mt-5">
+            <div class="grid grid-cols-1 gap-5 sm:grid-cols-3">
+                <div class="overflow-hidden rounded-lg bg-white shadow p-5">
+                    <p class="text-sm font-medium text-gray-500">Total Couriers</p>
+                    <p class="mt-1 text-2xl font-semibold text-gray-900">{{ total_couriers }}</p>
+                    <p class="mt-1 text-sm text-green-600">{{ available_couriers }} available</p>
+                </div>
+                <div class="overflow-hidden rounded-lg bg-white shadow p-5">
+                    <p class="text-sm font-medium text-gray-500">Total Restaurants</p>
+                    <p class="mt-1 text-2xl font-semibold text-gray-900">{{ total_restaurants }}</p>
+                </div>
+                <div class="overflow-hidden rounded-lg bg-white shadow p-5">
+                    <p class="text-sm font-medium text-gray-500">System Status</p>
+                    <p class="mt-1 text-2xl font-semibold text-green-600">Operational</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Recent Orders -->
+        <div class="mt-8">
+            <h2 class="text-lg font-medium text-gray-900 mb-4">Recent Orders</h2>
+            <div class="bg-white shadow overflow-hidden sm:rounded-md">
+                <ul role="list" class="divide-y divide-gray-200">
+                    {% for order in recent_orders %}
+                    <li>
+                        <div class="px-4 py-4 sm:px-6">
+                            <div class="flex items-center justify-between">
+                                <div class="flex-1">
+                                    <p class="text-sm font-medium text-indigo-600">{{ order.order_number }}</p>
+                                    <p class="text-sm text-gray-500">{{ order.restaurant_name }} → {{ order.customer_name }}</p>
+                                </div>
+                                <div class="ml-2 flex-shrink-0">
+                                    <span class="inline-flex rounded-full px-2 text-xs font-semibold leading-5
+                                        {% if order.status == 'delivered' %}bg-green-100 text-green-800
+                                        {% elif order.status == 'pending' %}bg-yellow-100 text-yellow-800
+                                        {% elif order.status in ['assigned', 'picked_up', 'in_transit'] %}bg-blue-100 text-blue-800
+                                        {% else %}bg-gray-100 text-gray-800{% endif %}">
+                                        {{ order.status }}
+                                    </span>
+                                </div>
+                            </div>
+                            <div class="mt-2 sm:flex sm:justify-between">
+                                <div class="sm:flex">
+                                    <p class="flex items-center text-sm text-gray-500">
+                                        {% if order.courier_user %}
+                                            Courier: {{ order.courier_user.full_name }}
+                                        {% else %}
+                                            No courier assigned
+                                        {% endif %}
+                                    </p>
+                                </div>
+                                <div class="mt-2 flex items-center text-sm text-gray-500 sm:mt-0">
+                                    <p>{{ order.created_at.strftime('%Y-%m-%d %H:%M') }}</p>
+                                </div>
+                            </div>
+                        </div>
+                    </li>
+                    {% else %}
+                    <li class="px-4 py-4 sm:px-6 text-center text-gray-500">
+                        No orders yet
+                    </li>
+                    {% endfor %}
+                </ul>
+            </div>
+        </div>
+
+        <!-- Recent Activity Logs -->
+        <div class="mt-8">
+            <h2 class="text-lg font-medium text-gray-900 mb-4">Recent Activity</h2>
+            <div class="bg-white shadow overflow-hidden sm:rounded-md">
+                <ul role="list" class="divide-y divide-gray-200">
+                    {% for log in recent_logs %}
+                    <li class="px-4 py-3 sm:px-6">
+                        <div class="flex items-center justify-between">
+                            <div class="flex-1">
+                                <p class="text-sm text-gray-900">{{ log.event_description }}</p>
+                                <p class="text-xs text-gray-500 mt-1">Order #{{ log.order_id }} - {{ log.event_type }}</p>
+                            </div>
+                            <div class="ml-2 flex-shrink-0 text-xs text-gray-500">
+                                {{ log.timestamp.strftime('%H:%M:%S') }}
+                            </div>
+                        </div>
+                    </li>
+                    {% else %}
+                    <li class="px-4 py-3 sm:px-6 text-center text-gray-500 text-sm">
+                        No activity yet
+                    </li>
+                    {% endfor %}
+                </ul>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

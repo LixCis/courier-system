@@ -1,0 +1,129 @@
+{% extends "base.html" %}
+
+{% block title %}Courier Dashboard{% endblock %}
+
+{% block content %}
+<div class="py-6">
+    <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+        <div class="sm:flex sm:items-center sm:justify-between">
+            <h1 class="text-2xl font-semibold text-gray-900">My Deliveries</h1>
+            <a href="{{ url_for('courier_toggle_availability') }}"
+               class="mt-4 sm:mt-0 inline-flex items-center rounded-md px-4 py-2 text-sm font-semibold text-white shadow-sm
+                      {% if is_available %}bg-gray-600 hover:bg-gray-500{% else %}bg-green-600 hover:bg-green-500{% endif %}">
+                {% if is_available %}
+                    Mark as Unavailable
+                {% else %}
+                    Mark as Available
+                {% endif %}
+            </a>
+        </div>
+
+        <!-- Statistics -->
+        <div class="mt-6 grid grid-cols-1 gap-5 sm:grid-cols-3">
+            <div class="overflow-hidden rounded-lg bg-white shadow p-5">
+                <p class="text-sm font-medium text-gray-500">Active Deliveries</p>
+                <p class="mt-1 text-3xl font-semibold text-blue-600">{{ active_orders|length }}</p>
+            </div>
+            <div class="overflow-hidden rounded-lg bg-white shadow p-5">
+                <p class="text-sm font-medium text-gray-500">Completed Today</p>
+                <p class="mt-1 text-3xl font-semibold text-green-600">{{ completed_orders|length }}</p>
+            </div>
+            <div class="overflow-hidden rounded-lg bg-white shadow p-5">
+                <p class="text-sm font-medium text-gray-500">Status</p>
+                <p class="mt-1 text-2xl font-semibold {% if is_available %}text-green-600{% else %}text-gray-600{% endif %}">
+                    {% if is_available %}Available{% else %}Unavailable{% endif %}
+                </p>
+            </div>
+        </div>
+
+        <!-- Active Orders -->
+        {% if active_orders %}
+        <div class="mt-8">
+            <h2 class="text-lg font-medium text-gray-900 mb-4">Active Deliveries</h2>
+            <div class="bg-white shadow overflow-hidden sm:rounded-md">
+                <ul role="list" class="divide-y divide-gray-200">
+                    {% for order in active_orders %}
+                    <li>
+                        <a href="{{ url_for('courier_view_order', order_id=order.id) }}" class="block hover:bg-gray-50">
+                            <div class="px-4 py-4 sm:px-6">
+                                <div class="flex items-center justify-between">
+                                    <div class="flex-1">
+                                        <p class="text-sm font-medium text-blue-600">{{ order.order_number }}</p>
+                                        <p class="text-sm text-gray-500 mt-1">{{ order.restaurant_name }}</p>
+                                    </div>
+                                    <div class="ml-2 flex-shrink-0">
+                                        <span class="inline-flex rounded-full px-3 py-1 text-xs font-semibold
+                                            {% if order.status == 'assigned' %}bg-yellow-100 text-yellow-800
+                                            {% elif order.status == 'picked_up' %}bg-blue-100 text-blue-800
+                                            {% elif order.status == 'in_transit' %}bg-purple-100 text-purple-800
+                                            {% endif %}">
+                                            {{ order.status|replace('_', ' ')|title }}
+                                        </span>
+                                    </div>
+                                </div>
+                                <div class="mt-2">
+                                    <p class="text-sm text-gray-700">
+                                        <span class="font-medium">Pickup:</span> {{ order.pickup_address }}
+                                    </p>
+                                    <p class="text-sm text-gray-700 mt-1">
+                                        <span class="font-medium">Deliver to:</span> {{ order.customer_name }} - {{ order.delivery_address }}
+                                    </p>
+                                    {% if order.special_instructions %}
+                                    <p class="text-sm text-orange-600 mt-1">
+                                        <span class="font-medium">Note:</span> {{ order.special_instructions }}
+                                    </p>
+                                    {% endif %}
+                                </div>
+                            </div>
+                        </a>
+                    </li>
+                    {% endfor %}
+                </ul>
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- All Orders History -->
+        <div class="mt-8">
+            <h2 class="text-lg font-medium text-gray-900 mb-4">Order History</h2>
+            <div class="bg-white shadow overflow-hidden sm:rounded-md">
+                <ul role="list" class="divide-y divide-gray-200">
+                    {% for order in all_orders %}
+                    <li>
+                        <a href="{{ url_for('courier_view_order', order_id=order.id) }}" class="block hover:bg-gray-50">
+                            <div class="px-4 py-4 sm:px-6">
+                                <div class="flex items-center justify-between">
+                                    <div class="flex-1">
+                                        <p class="text-sm font-medium text-gray-900">{{ order.order_number }}</p>
+                                        <p class="text-sm text-gray-500">{{ order.restaurant_name }} → {{ order.customer_name }}</p>
+                                    </div>
+                                    <div class="ml-2 flex-shrink-0 flex items-center space-x-2">
+                                        <span class="inline-flex rounded-full px-2 text-xs font-semibold
+                                            {% if order.status == 'delivered' %}bg-green-100 text-green-800
+                                            {% elif order.status == 'pending' %}bg-yellow-100 text-yellow-800
+                                            {% elif order.status in ['assigned', 'picked_up', 'in_transit'] %}bg-blue-100 text-blue-800
+                                            {% else %}bg-gray-100 text-gray-800{% endif %}">
+                                            {{ order.status|replace('_', ' ')|title }}
+                                        </span>
+                                        <span class="text-xs text-gray-500">{{ order.created_at.strftime('%m/%d %H:%M') }}</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </a>
+                    </li>
+                    {% else %}
+                    <li class="px-4 py-8 text-center">
+                        <p class="text-gray-500">No orders assigned yet</p>
+                        {% if not is_available %}
+                        <a href="{{ url_for('courier_toggle_availability') }}" class="mt-2 inline-block text-blue-600 hover:text-blue-500">
+                            Mark yourself as available to receive orders
+                        </a>
+                        {% endif %}
+                    </li>
+                    {% endfor %}
+                </ul>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
