@@ -75,6 +75,32 @@
                 {% if order.status != 'delivered' %}
                 <div class="mt-6 border-t border-gray-200 pt-6">
                     <h3 class="text-lg font-medium text-gray-900 mb-4">Update Delivery Status</h3>
+
+                    {% if order.status == 'in_transit' %}
+                    <!-- Quick Complete Button for In Transit Orders -->
+                    <form action="{{ url_for('courier_update_order_status', order_id=order.id) }}" method="POST" enctype="multipart/form-data">
+                        <input type="hidden" name="status" value="delivered">
+
+                        <!-- Delivery Proof Upload -->
+                        <div class="mb-4 bg-green-50 border border-green-200 rounded-lg p-4">
+                            <label class="block text-sm font-medium text-green-900 mb-2">
+                                Upload Delivery Proof Photo (Optional)
+                            </label>
+                            <input type="file" name="delivery_proof" accept="image/*" capture="environment"
+                                   class="block w-full text-sm text-gray-900 border border-gray-300 rounded-lg cursor-pointer bg-white focus:outline-none">
+                            <p class="mt-1 text-xs text-green-700">Take a photo of the delivered order</p>
+                        </div>
+
+                        <button type="submit"
+                                class="w-full inline-flex justify-center items-center rounded-md border border-transparent bg-green-600 px-6 py-4 text-lg font-bold text-white shadow-lg hover:bg-green-700 focus:outline-none focus:ring-4 focus:ring-green-500 focus:ring-offset-2">
+                            <svg class="h-6 w-6 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+                            </svg>
+                            Mark as Delivered
+                        </button>
+                    </form>
+                    {% else %}
+                    <!-- Regular Status Update -->
                     <form action="{{ url_for('courier_update_order_status', order_id=order.id) }}" method="POST">
                         <div class="flex items-center space-x-4">
                             <select name="status" required
@@ -83,8 +109,6 @@
                                     <option value="picked_up">Picked Up</option>
                                 {% elif order.status == 'picked_up' %}
                                     <option value="in_transit">In Transit</option>
-                                {% elif order.status == 'in_transit' %}
-                                    <option value="delivered">Delivered</option>
                                 {% endif %}
                             </select>
                             <button type="submit"
@@ -93,6 +117,17 @@
                             </button>
                         </div>
                     </form>
+                    {% endif %}
+                </div>
+                {% endif %}
+
+                <!-- Display Delivery Proof if exists -->
+                {% if order.delivery_proof_photo %}
+                <div class="mt-6 border-t border-gray-200 pt-6">
+                    <h3 class="text-lg font-medium text-gray-900 mb-4">Delivery Proof</h3>
+                    <img src="{{ url_for('static', filename='uploads/' + order.delivery_proof_photo) }}"
+                         alt="Delivery Proof"
+                         class="rounded-lg shadow-md max-w-md">
                 </div>
                 {% endif %}
             </div>

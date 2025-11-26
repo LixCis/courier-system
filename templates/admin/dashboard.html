@@ -118,10 +118,13 @@
 
         <!-- Recent Orders -->
         <div class="mt-8">
-            <h2 class="text-lg font-medium text-gray-900 mb-4">Recent Orders</h2>
+            <div class="sm:flex sm:items-center sm:justify-between mb-4">
+                <h2 class="text-lg font-medium text-gray-900">Recent Orders</h2>
+                <a href="{{ url_for('admin_orders') }}" class="text-sm text-indigo-600 hover:text-indigo-900">View all →</a>
+            </div>
             <div class="bg-white shadow overflow-hidden sm:rounded-md">
                 <ul role="list" class="divide-y divide-gray-200">
-                    {% for order in recent_orders %}
+                    {% for order in orders_pagination.items %}
                     <li>
                         <div class="px-4 py-4 sm:px-6">
                             <div class="flex items-center justify-between">
@@ -162,6 +165,41 @@
                     {% endfor %}
                 </ul>
             </div>
+
+            <!-- Orders Pagination -->
+            {% if orders_pagination.pages > 1 %}
+            <div class="bg-white px-4 py-3 flex items-center justify-between border-t border-gray-200 mt-0">
+                <div class="flex-1 flex justify-between sm:hidden">
+                    {% if orders_pagination.has_prev %}
+                    <a href="{{ url_for('admin_dashboard', orders_page=orders_pagination.prev_num, logs_page=request.args.get('logs_page', 1)) }}" class="relative inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50">
+                        Previous
+                    </a>
+                    {% endif %}
+                    {% if orders_pagination.has_next %}
+                    <a href="{{ url_for('admin_dashboard', orders_page=orders_pagination.next_num, logs_page=request.args.get('logs_page', 1)) }}" class="ml-3 relative inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50">
+                        Next
+                    </a>
+                    {% endif %}
+                </div>
+                <div class="hidden sm:flex-1 sm:flex sm:items-center sm:justify-between">
+                    <div>
+                        <p class="text-sm text-gray-700">
+                            Page <span class="font-medium">{{ orders_pagination.page }}</span> of <span class="font-medium">{{ orders_pagination.pages }}</span>
+                        </p>
+                    </div>
+                    <div>
+                        <nav class="relative z-0 inline-flex rounded-md shadow-sm -space-x-px" aria-label="Pagination">
+                            {% if orders_pagination.has_prev %}
+                            <a href="{{ url_for('admin_dashboard', orders_page=orders_pagination.prev_num, logs_page=request.args.get('logs_page', 1)) }}" class="relative inline-flex items-center px-2 py-2 rounded-l-md border border-gray-300 bg-white text-sm font-medium text-gray-500 hover:bg-gray-50">Previous</a>
+                            {% endif %}
+                            {% if orders_pagination.has_next %}
+                            <a href="{{ url_for('admin_dashboard', orders_page=orders_pagination.next_num, logs_page=request.args.get('logs_page', 1)) }}" class="relative inline-flex items-center px-2 py-2 rounded-r-md border border-gray-300 bg-white text-sm font-medium text-gray-500 hover:bg-gray-50">Next</a>
+                            {% endif %}
+                        </nav>
+                    </div>
+                </div>
+            </div>
+            {% endif %}
         </div>
 
         <!-- Recent Activity Logs -->
@@ -169,7 +207,7 @@
             <h2 class="text-lg font-medium text-gray-900 mb-4">Recent Activity</h2>
             <div class="bg-white shadow overflow-hidden sm:rounded-md">
                 <ul role="list" class="divide-y divide-gray-200">
-                    {% for log in recent_logs %}
+                    {% for log in logs_pagination.items %}
                     <li class="px-4 py-3 sm:px-6">
                         <div class="flex items-center justify-between">
                             <div class="flex-1">
@@ -188,6 +226,41 @@
                     {% endfor %}
                 </ul>
             </div>
+
+            <!-- Logs Pagination -->
+            {% if logs_pagination.pages > 1 %}
+            <div class="bg-white px-4 py-3 flex items-center justify-between border-t border-gray-200 mt-0">
+                <div class="flex-1 flex justify-between sm:hidden">
+                    {% if logs_pagination.has_prev %}
+                    <a href="{{ url_for('admin_dashboard', orders_page=request.args.get('orders_page', 1), logs_page=logs_pagination.prev_num) }}" class="relative inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50">
+                        Previous
+                    </a>
+                    {% endif %}
+                    {% if logs_pagination.has_next %}
+                    <a href="{{ url_for('admin_dashboard', orders_page=request.args.get('orders_page', 1), logs_page=logs_pagination.next_num) }}" class="ml-3 relative inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50">
+                        Next
+                    </a>
+                    {% endif %}
+                </div>
+                <div class="hidden sm:flex-1 sm:flex sm:items-center sm:justify-between">
+                    <div>
+                        <p class="text-sm text-gray-700">
+                            Page <span class="font-medium">{{ logs_pagination.page }}</span> of <span class="font-medium">{{ logs_pagination.pages }}</span>
+                        </p>
+                    </div>
+                    <div>
+                        <nav class="relative z-0 inline-flex rounded-md shadow-sm -space-x-px" aria-label="Pagination">
+                            {% if logs_pagination.has_prev %}
+                            <a href="{{ url_for('admin_dashboard', orders_page=request.args.get('orders_page', 1), logs_page=logs_pagination.prev_num) }}" class="relative inline-flex items-center px-2 py-2 rounded-l-md border border-gray-300 bg-white text-sm font-medium text-gray-500 hover:bg-gray-50">Previous</a>
+                            {% endif %}
+                            {% if logs_pagination.has_next %}
+                            <a href="{{ url_for('admin_dashboard', orders_page=request.args.get('orders_page', 1), logs_page=logs_pagination.next_num) }}" class="relative inline-flex items-center px-2 py-2 rounded-r-md border border-gray-300 bg-white text-sm font-medium text-gray-500 hover:bg-gray-50">Next</a>
+                            {% endif %}
+                        </nav>
+                    </div>
+                </div>
+            </div>
+            {% endif %}
         </div>
     </div>
 </div>

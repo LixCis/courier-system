@@ -65,6 +65,9 @@ class Order(db.Model):
     status = db.Column(db.String(20), default='pending')  # pending, assigned, picked_up, in_transit, delivered, cancelled
     priority = db.Column(db.Integer, default=0)  # For future AI optimization
 
+    # Delivery proof
+    delivery_proof_photo = db.Column(db.String(255))  # Path to uploaded photo
+
     # Timestamps (critical for AI analysis)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
     assigned_at = db.Column(db.DateTime)
@@ -110,3 +113,19 @@ class DeliveryLog(db.Model):
 
     def __repr__(self):
         return f'<DeliveryLog Order#{self.order_id} - {self.event_type}>'
+
+
+class SavedCustomer(db.Model):
+    """Saved customer addresses for quick order creation"""
+    __tablename__ = 'saved_customers'
+
+    id = db.Column(db.Integer, primary_key=True)
+    restaurant_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    customer_name = db.Column(db.String(120), nullable=False)
+    customer_phone = db.Column(db.String(20), nullable=False)
+    delivery_address = db.Column(db.Text, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    last_used_at = db.Column(db.DateTime)
+
+    def __repr__(self):
+        return f'<SavedCustomer {self.customer_name}>'

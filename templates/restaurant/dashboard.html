@@ -6,17 +6,25 @@
 <div class="py-6">
     <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
         <div class="sm:flex sm:items-center sm:justify-between">
-            <h1 class="text-2xl font-semibold text-gray-900">My Orders</h1>
-            <a href="{{ url_for('restaurant_create_order') }}" class="mt-4 sm:mt-0 inline-flex items-center rounded-md bg-green-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-green-500">
-                <svg class="-ml-0.5 mr-1.5 h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
-                </svg>
-                Create New Order
-            </a>
+            <h1 class="text-2xl font-semibold text-gray-900">Active Orders</h1>
+            <div class="mt-4 sm:mt-0 flex space-x-3">
+                <a href="{{ url_for('restaurant_order_history') }}" class="inline-flex items-center rounded-md bg-gray-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-gray-500">
+                    <svg class="-ml-0.5 mr-1.5 h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    Order History
+                </a>
+                <a href="{{ url_for('restaurant_create_order') }}" class="inline-flex items-center rounded-md bg-green-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-green-500">
+                    <svg class="-ml-0.5 mr-1.5 h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+                    </svg>
+                    Create New Order
+                </a>
+            </div>
         </div>
 
         <!-- Statistics -->
-        <div class="mt-6 grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-4">
+        <div class="mt-6 grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-5">
             <div class="overflow-hidden rounded-lg bg-white shadow p-5">
                 <p class="text-sm font-medium text-gray-500">Total Orders</p>
                 <p class="mt-1 text-3xl font-semibold text-gray-900">{{ total_orders }}</p>
@@ -32,6 +40,10 @@
             <div class="overflow-hidden rounded-lg bg-white shadow p-5">
                 <p class="text-sm font-medium text-gray-500">Completed</p>
                 <p class="mt-1 text-3xl font-semibold text-green-600">{{ completed_orders }}</p>
+            </div>
+            <div class="overflow-hidden rounded-lg bg-green-50 border-2 border-green-200 shadow p-5">
+                <p class="text-sm font-medium text-green-700">Available Couriers</p>
+                <p class="mt-1 text-3xl font-semibold text-green-600">{{ available_couriers }}</p>
             </div>
         </div>
 

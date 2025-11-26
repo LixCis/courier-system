@@ -5,7 +5,15 @@
 {% block content %}
 <div class="py-6">
     <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-        <h1 class="text-2xl font-semibold text-gray-900">User Management</h1>
+        <div class="sm:flex sm:items-center sm:justify-between">
+            <h1 class="text-2xl font-semibold text-gray-900">User Management</h1>
+            <a href="{{ url_for('admin_create_user') }}" class="mt-4 sm:mt-0 inline-flex items-center rounded-md bg-indigo-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500">
+                <svg class="-ml-0.5 mr-1.5 h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+                </svg>
+                Create User
+            </a>
+        </div>
 
         <div class="mt-8 flex flex-col">
             <div class="-my-2 -mx-4 overflow-x-auto sm:-mx-6 lg:-mx-8">
@@ -23,7 +31,7 @@
                                 </tr>
                             </thead>
                             <tbody class="divide-y divide-gray-200 bg-white">
-                                {% for user in users %}
+                                {% for user in pagination.items %}
                                 <tr>
                                     <td class="whitespace-nowrap py-4 pl-4 pr-3 text-sm font-medium text-gray-900 sm:pl-6">
                                         {{ user.full_name }}
@@ -40,25 +48,48 @@
                                         </span>
                                     </td>
                                     <td class="whitespace-nowrap px-3 py-4 text-sm text-gray-500">
-                                        {% if user.role == 'courier' %}
-                                            <span class="inline-flex rounded-full px-2 text-xs font-semibold leading-5
-                                                {% if user.is_available %}bg-green-100 text-green-800{% else %}bg-gray-100 text-gray-800{% endif %}">
-                                                {% if user.is_available %}Available{% else %}Unavailable{% endif %}
-                                            </span>
-                                        {% else %}
+                                        <div class="flex flex-col space-y-1">
                                             <span class="inline-flex rounded-full px-2 text-xs font-semibold leading-5
                                                 {% if user.is_active %}bg-green-100 text-green-800{% else %}bg-red-100 text-red-800{% endif %}">
-                                                {% if user.is_active %}Active{% else %}Inactive{% endif %}
+                                                {% if user.is_active %}Account: Active{% else %}Account: Inactive{% endif %}
                                             </span>
-                                        {% endif %}
+                                            {% if user.role == 'courier' %}
+                                                <span class="inline-flex rounded-full px-2 text-xs font-semibold leading-5
+                                                    {% if user.is_available %}bg-blue-100 text-blue-800{% else %}bg-gray-100 text-gray-800{% endif %}">
+                                                    {% if user.is_available %}Work: Available{% else %}Work: Unavailable{% endif %}
+                                                </span>
+                                            {% endif %}
+                                        </div>
                                     </td>
                                     <td class="whitespace-nowrap px-3 py-4 text-sm">
-                                        {% if user.role == 'courier' %}
-                                            <a href="{{ url_for('admin_toggle_courier_availability', courier_id=user.id) }}"
-                                               class="text-indigo-600 hover:text-indigo-900">
-                                                Toggle Availability
-                                            </a>
-                                        {% endif %}
+                                        <div class="flex space-x-3">
+                                            {% if user.role != 'admin' %}
+                                                <a href="{{ url_for('admin_edit_user', user_id=user.id) }}"
+                                                   class="text-indigo-600 hover:text-indigo-900">
+                                                    Edit
+                                                </a>
+                                                {% if user.role == 'courier' %}
+                                                    <a href="{{ url_for('admin_toggle_courier_availability', courier_id=user.id) }}"
+                                                       class="text-green-600 hover:text-green-900">
+                                                        Toggle Avail.
+                                                    </a>
+                                                {% endif %}
+                                                <form method="POST" action="{{ url_for('admin_delete_user', user_id=user.id) }}" class="inline"
+                                                      onsubmit="return confirm('Are you sure you want to delete {{ user.full_name }}?');">
+                                                    <button type="submit" class="text-red-600 hover:text-red-900">
+                                                        Delete
+                                                    </button>
+                                                </form>
+                                            {% else %}
+                                                <span class="text-gray-400 text-xs">Protected</span>
+                                            {% endif %}
+                                        </div>
+                                    </td>
+                                </tr>
+                                {% else %}
+                                <tr>
+                                    <td colspan="6" class="px-3 py-8 text-center text-gray-500">
+                                        No users found
                                     </td>
                                 </tr>
                                 {% endfor %}
@@ -68,6 +99,64 @@
                 </div>
             </div>
         </div>
+
+        <!-- Pagination -->
+        {% if pagination.pages > 1 %}
+        <div class="bg-white px-4 py-3 flex items-center justify-between border-t border-gray-200 sm:px-6 mt-4">
+            <div class="flex-1 flex justify-between sm:hidden">
+                {% if pagination.has_prev %}
+                <a href="{{ url_for('admin_users', page=pagination.prev_num) }}" class="relative inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50">
+                    Previous
+                </a>
+                {% endif %}
+                {% if pagination.has_next %}
+                <a href="{{ url_for('admin_users', page=pagination.next_num) }}" class="ml-3 relative inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50">
+                    Next
+                </a>
+                {% endif %}
+            </div>
+            <div class="hidden sm:flex-1 sm:flex sm:items-center sm:justify-between">
+                <div>
+                    <p class="text-sm text-gray-700">
+                        Showing <span class="font-medium">{{ ((pagination.page - 1) * pagination.per_page) + 1 }}</span> to <span class="font-medium">{{ min(pagination.page * pagination.per_page, pagination.total) }}</span> of <span class="font-medium">{{ pagination.total }}</span> users
+                    </p>
+                </div>
+                <div>
+                    <nav class="relative z-0 inline-flex rounded-md shadow-sm -space-x-px" aria-label="Pagination">
+                        {% if pagination.has_prev %}
+                        <a href="{{ url_for('admin_users', page=pagination.prev_num) }}" class="relative inline-flex items-center px-2 py-2 rounded-l-md border border-gray-300 bg-white text-sm font-medium text-gray-500 hover:bg-gray-50">
+                            <span>Previous</span>
+                        </a>
+                        {% endif %}
+
+                        {% for page_num in pagination.iter_pages(left_edge=1, right_edge=1, left_current=2, right_current=2) %}
+                            {% if page_num %}
+                                {% if page_num == pagination.page %}
+                                <span class="relative inline-flex items-center px-4 py-2 border border-gray-300 bg-indigo-50 text-sm font-medium text-indigo-600">
+                                    {{ page_num }}
+                                </span>
+                                {% else %}
+                                <a href="{{ url_for('admin_users', page=page_num) }}" class="relative inline-flex items-center px-4 py-2 border border-gray-300 bg-white text-sm font-medium text-gray-700 hover:bg-gray-50">
+                                    {{ page_num }}
+                                </a>
+                                {% endif %}
+                            {% else %}
+                            <span class="relative inline-flex items-center px-4 py-2 border border-gray-300 bg-white text-sm font-medium text-gray-700">
+                                ...
+                            </span>
+                            {% endif %}
+                        {% endfor %}
+
+                        {% if pagination.has_next %}
+                        <a href="{{ url_for('admin_users', page=pagination.next_num) }}" class="relative inline-flex items-center px-2 py-2 rounded-r-md border border-gray-300 bg-white text-sm font-medium text-gray-500 hover:bg-gray-50">
+                            <span>Next</span>
+                        </a>
+                        {% endif %}
+                    </nav>
+                </div>
+            </div>
+        </div>
+        {% endif %}
     </div>
 </div>
 {% endblock %}

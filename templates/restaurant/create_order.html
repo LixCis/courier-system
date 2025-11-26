@@ -10,6 +10,32 @@
         <form action="{{ url_for('restaurant_create_order') }}" method="POST" class="mt-6 space-y-6">
             <div class="bg-white shadow sm:rounded-lg">
                 <div class="px-4 py-5 sm:p-6 space-y-6">
+                    <!-- Saved Customers Quick Select -->
+                    {% if saved_customers %}
+                    <div class="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                        <label for="customer_search" class="block text-sm font-medium text-blue-900 mb-2">
+                            Quick Select: Saved Customers
+                        </label>
+                        <input type="text" id="customer_search" placeholder="Search by name or phone..."
+                               oninput="filterCustomers()"
+                               class="block w-full rounded-md border-gray-300 shadow-sm focus:border-green-500 focus:ring-green-500 sm:text-sm px-3 py-2 border bg-white mb-2">
+                        <select id="saved_customer_select" onchange="fillCustomerData()" size="5"
+                                class="block w-full rounded-md border-gray-300 shadow-sm focus:border-green-500 focus:ring-green-500 sm:text-sm px-3 py-2 border bg-white">
+                            <option value="">-- Select a saved customer --</option>
+                            {% for customer in saved_customers %}
+                            <option value="{{ customer.id }}"
+                                    data-name="{{ customer.customer_name }}"
+                                    data-phone="{{ customer.customer_phone }}"
+                                    data-address="{{ customer.delivery_address }}"
+                                    data-search="{{ customer.customer_name|lower }} {{ customer.customer_phone }}">
+                                {{ customer.customer_name }} - {{ customer.customer_phone }}
+                            </option>
+                            {% endfor %}
+                        </select>
+                        <p class="mt-1 text-xs text-blue-700">Search and select a customer to auto-fill their information</p>
+                    </div>
+                    {% endif %}
+
                     <!-- Customer Information -->
                     <div>
                         <h3 class="text-lg font-medium leading-6 text-gray-900">Customer Information</h3>
@@ -25,6 +51,13 @@
                                        class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-green-500 focus:ring-green-500 sm:text-sm px-3 py-2 border">
                             </div>
                         </div>
+                        <div class="mt-3">
+                            <label class="flex items-center">
+                                <input type="checkbox" name="save_customer" id="save_customer"
+                                       class="h-4 w-4 rounded border-gray-300 text-green-600 focus:ring-green-500">
+                                <span class="ml-2 text-sm text-gray-700">Save this customer for future orders</span>
+                            </label>
+                        </div>
                     </div>
 
                     <!-- Delivery Information -->
@@ -34,7 +67,7 @@
                             <div>
                                 <label for="pickup_address" class="block text-sm font-medium text-gray-700">Pickup Address (Your Restaurant)</label>
                                 <textarea name="pickup_address" id="pickup_address" rows="2" required
-                                          class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-green-500 focus:ring-green-500 sm:text-sm px-3 py-2 border"></textarea>
+                                          class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-green-500 focus:ring-green-500 sm:text-sm px-3 py-2 border">{{ current_user.current_location or '' }}</textarea>
                             </div>
                             <div>
                                 <label for="delivery_address" class="block text-sm font-medium text-gray-700">Delivery Address</label>
@@ -83,4 +116,38 @@
         </form>
     </div>
 </div>
+
+<script>
+function fillCustomerData() {
+    const select = document.getElementById('saved_customer_select');
+    const selectedOption = select.options[select.selectedIndex];
+
+    if (selectedOption.value) {
+        document.getElementById('customer_name').value = selectedOption.dataset.name;
+        document.getElementById('customer_phone').value = selectedOption.dataset.phone;
+        document.getElementById('delivery_address').value = selectedOption.dataset.address;
+    } else {
+        // Clear fields if "Select a saved customer" is chosen
+        document.getElementById('customer_name').value = '';
+        document.getElementById('customer_phone').value = '';
+        document.getElementById('delivery_address').value = '';
+    }
+}
+
+function filterCustomers() {
+    const search = document.getElementById('customer_search').value.toLowerCase();
+    const select = document.getElementById('saved_customer_select');
+
+    for (let i = 0; i < select.options.length; i++) {
+        const option = select.options[i];
+        const searchText = option.dataset.search || '';
+
+        if (searchText.includes(search) || option.value === '') {
+            option.style.display = '';
+        } else {
+            option.style.display = 'none';
+        }
+    }
+}
+</script>
 {% endblock %}

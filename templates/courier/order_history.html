@@ -1,0 +1,191 @@
+{% extends "base.html" %}
+
+{% block title %}Delivery History{% endblock %}
+
+{% block content %}
+<div class="py-6">
+    <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+        <div class="sm:flex sm:items-center sm:justify-between mb-6">
+            <h1 class="text-2xl font-semibold text-gray-900">Delivery History</h1>
+            <a href="{{ url_for('courier_dashboard') }}" class="mt-4 sm:mt-0 inline-flex items-center rounded-md bg-gray-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-gray-500">
+                ← Back to Active Deliveries
+            </a>
+        </div>
+
+        <!-- Search and Filter Form -->
+        <div class="bg-white shadow rounded-lg p-4 mb-6">
+            <form method="GET" action="{{ url_for('courier_order_history') }}" class="space-y-4">
+                <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                    <!-- Search Input -->
+                    <div class="lg:col-span-2">
+                        <label for="search" class="block text-sm font-medium text-gray-700 mb-1">Search</label>
+                        <input type="text" name="search" id="search" value="{{ search_query }}"
+                               placeholder="Order #, customer, restaurant..."
+                               class="block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm px-3 py-2 border">
+                    </div>
+
+                    <!-- Status Filter -->
+                    <div>
+                        <label for="status" class="block text-sm font-medium text-gray-700 mb-1">Status</label>
+                        <select name="status" id="status" class="block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm px-3 py-2 border">
+                            <option value="all" {% if status_filter == 'all' %}selected{% endif %}>All Status</option>
+                            <option value="assigned" {% if status_filter == 'assigned' %}selected{% endif %}>Assigned</option>
+                            <option value="picked_up" {% if status_filter == 'picked_up' %}selected{% endif %}>Picked Up</option>
+                            <option value="in_transit" {% if status_filter == 'in_transit' %}selected{% endif %}>In Transit</option>
+                            <option value="delivered" {% if status_filter == 'delivered' %}selected{% endif %}>Delivered</option>
+                            <option value="cancelled" {% if status_filter == 'cancelled' %}selected{% endif %}>Cancelled</option>
+                        </select>
+                    </div>
+
+                    <!-- Filter Buttons -->
+                    <div class="flex items-end">
+                        <button type="submit" class="w-full inline-flex justify-center items-center rounded-md bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-500">
+                            <svg class="h-4 w-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                            </svg>
+                            Search
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Date Range -->
+                <div class="grid grid-cols-1 gap-4 sm:grid-cols-3">
+                    <div>
+                        <label for="date_from" class="block text-sm font-medium text-gray-700 mb-1">From Date</label>
+                        <input type="date" name="date_from" id="date_from" value="{{ date_from }}"
+                               class="block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm px-3 py-2 border">
+                    </div>
+                    <div>
+                        <label for="date_to" class="block text-sm font-medium text-gray-700 mb-1">To Date</label>
+                        <input type="date" name="date_to" id="date_to" value="{{ date_to }}"
+                               class="block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm px-3 py-2 border">
+                    </div>
+                    <div class="flex items-end">
+                        <a href="{{ url_for('courier_order_history') }}" class="w-full inline-flex justify-center items-center rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50">
+                            Clear Filters
+                        </a>
+                    </div>
+                </div>
+            </form>
+        </div>
+
+        <!-- Orders Table -->
+        <div class="bg-white shadow overflow-hidden sm:rounded-md">
+            <table class="min-w-full divide-y divide-gray-300">
+                <thead class="bg-gray-50">
+                    <tr>
+                        <th scope="col" class="py-3.5 pl-4 pr-3 text-left text-sm font-semibold text-gray-900 sm:pl-6">Order #</th>
+                        <th scope="col" class="px-3 py-3.5 text-left text-sm font-semibold text-gray-900">Restaurant</th>
+                        <th scope="col" class="px-3 py-3.5 text-left text-sm font-semibold text-gray-900">Customer</th>
+                        <th scope="col" class="px-3 py-3.5 text-left text-sm font-semibold text-gray-900">Status</th>
+                        <th scope="col" class="px-3 py-3.5 text-left text-sm font-semibold text-gray-900">Created</th>
+                        <th scope="col" class="px-3 py-3.5 text-left text-sm font-semibold text-gray-900">Completed</th>
+                        <th scope="col" class="px-3 py-3.5 text-left text-sm font-semibold text-gray-900">Actions</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-gray-200 bg-white">
+                    {% for order in orders %}
+                    <tr>
+                        <td class="whitespace-nowrap py-4 pl-4 pr-3 text-sm font-medium text-gray-900 sm:pl-6">
+                            {{ order.order_number }}
+                        </td>
+                        <td class="whitespace-nowrap px-3 py-4 text-sm text-gray-500">{{ order.restaurant_name }}</td>
+                        <td class="whitespace-nowrap px-3 py-4 text-sm text-gray-500">{{ order.customer_name }}</td>
+                        <td class="whitespace-nowrap px-3 py-4 text-sm">
+                            <span class="inline-flex rounded-full px-2 text-xs font-semibold leading-5
+                                {% if order.status == 'delivered' %}bg-green-100 text-green-800
+                                {% elif order.status == 'cancelled' %}bg-red-100 text-red-800
+                                {% elif order.status == 'assigned' %}bg-yellow-100 text-yellow-800
+                                {% elif order.status == 'picked_up' %}bg-blue-100 text-blue-800
+                                {% elif order.status == 'in_transit' %}bg-purple-100 text-purple-800
+                                {% else %}bg-gray-100 text-gray-800{% endif %}">
+                                {{ order.status|replace('_', ' ')|title }}
+                            </span>
+                        </td>
+                        <td class="whitespace-nowrap px-3 py-4 text-sm text-gray-500">
+                            {{ order.created_at.strftime('%Y-%m-%d %H:%M') }}
+                        </td>
+                        <td class="whitespace-nowrap px-3 py-4 text-sm text-gray-500">
+                            {% if order.delivered_at %}
+                                {{ order.delivered_at.strftime('%Y-%m-%d %H:%M') }}
+                            {% else %}
+                                <span class="text-gray-400">-</span>
+                            {% endif %}
+                        </td>
+                        <td class="whitespace-nowrap px-3 py-4 text-sm">
+                            <a href="{{ url_for('courier_view_order', order_id=order.id) }}" class="text-blue-600 hover:text-blue-900">
+                                View
+                            </a>
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="7" class="px-3 py-8 text-center text-gray-500">
+                            No deliveries found
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+        <!-- Pagination -->
+        {% if pagination.pages > 1 %}
+        <div class="bg-white px-4 py-3 flex items-center justify-between border-t border-gray-200 sm:px-6 mt-4">
+            <div class="flex-1 flex justify-between sm:hidden">
+                {% if pagination.has_prev %}
+                <a href="{{ url_for('courier_order_history', page=pagination.prev_num, status=status_filter, search=search_query, date_from=date_from, date_to=date_to) }}" class="relative inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50">
+                    Previous
+                </a>
+                {% endif %}
+                {% if pagination.has_next %}
+                <a href="{{ url_for('courier_order_history', page=pagination.next_num, status=status_filter, search=search_query, date_from=date_from, date_to=date_to) }}" class="ml-3 relative inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50">
+                    Next
+                </a>
+                {% endif %}
+            </div>
+            <div class="hidden sm:flex-1 sm:flex sm:items-center sm:justify-between">
+                <div>
+                    <p class="text-sm text-gray-700">
+                        Showing <span class="font-medium">{{ ((pagination.page - 1) * pagination.per_page) + 1 }}</span> to <span class="font-medium">{{ min(pagination.page * pagination.per_page, pagination.total) }}</span> of <span class="font-medium">{{ pagination.total }}</span> results
+                    </p>
+                </div>
+                <div>
+                    <nav class="relative z-0 inline-flex rounded-md shadow-sm -space-x-px" aria-label="Pagination">
+                        {% if pagination.has_prev %}
+                        <a href="{{ url_for('courier_order_history', page=pagination.prev_num, status=status_filter, search=search_query, date_from=date_from, date_to=date_to) }}" class="relative inline-flex items-center px-2 py-2 rounded-l-md border border-gray-300 bg-white text-sm font-medium text-gray-500 hover:bg-gray-50">
+                            <span>Previous</span>
+                        </a>
+                        {% endif %}
+
+                        {% for page_num in pagination.iter_pages(left_edge=1, right_edge=1, left_current=2, right_current=2) %}
+                            {% if page_num %}
+                                {% if page_num == pagination.page %}
+                                <span class="relative inline-flex items-center px-4 py-2 border border-gray-300 bg-blue-50 text-sm font-medium text-blue-600">
+                                    {{ page_num }}
+                                </span>
+                                {% else %}
+                                <a href="{{ url_for('courier_order_history', page=page_num, status=status_filter, search=search_query, date_from=date_from, date_to=date_to) }}" class="relative inline-flex items-center px-4 py-2 border border-gray-300 bg-white text-sm font-medium text-gray-700 hover:bg-gray-50">
+                                    {{ page_num }}
+                                </a>
+                                {% endif %}
+                            {% else %}
+                            <span class="relative inline-flex items-center px-4 py-2 border border-gray-300 bg-white text-sm font-medium text-gray-700">
+                                ...
+                            </span>
+                            {% endif %}
+                        {% endfor %}
+
+                        {% if pagination.has_next %}
+                        <a href="{{ url_for('courier_order_history', page=pagination.next_num, status=status_filter, search=search_query, date_from=date_from, date_to=date_to) }}" class="relative inline-flex items-center px-2 py-2 rounded-r-md border border-gray-300 bg-white text-sm font-medium text-gray-500 hover:bg-gray-50">
+                            <span>Next</span>
+                        </a>
+                        {% endif %}
+                    </nav>
+                </div>
+            </div>
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}
