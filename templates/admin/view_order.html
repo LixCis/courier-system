@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% import "components/order_components.html" as order_components %}
+
+{% block title %}Order {{ order.order_number }} - Admin{% endblock %}
+
+{% block content %}
+<div class="py-6">
+    <div class="mx-auto max-w-5xl px-4 sm:px-6 lg:px-8">
+
+        {# Order Header #}
+        {% call order_components.order_header(order, url_for('admin_orders'), '← Back to All Orders') %}
+        {% endcall %}
+
+        {# Order Details - Admin sees all information #}
+        {{ order_components.order_details(order, [
+            'restaurant',
+            'courier',
+            'customer_name',
+            'customer_phone',
+            'pickup_address',
+            'delivery_address',
+            'order_value',
+            'items_description',
+            'special_instructions'
+        ]) }}
+
+        {# Display Delivery Proof if exists #}
+        {% if order.delivery_proof_photo %}
+        <div class="mt-6 border-t border-gray-200 pt-6">
+            <h3 class="text-lg font-medium text-gray-900 mb-4">Delivery Proof</h3>
+            <img src="{{ url_for('static', filename='uploads/' + order.delivery_proof_photo) }}"
+                 alt="Delivery Proof"
+                 class="rounded-lg shadow-md max-w-md">
+
+            {# Display Image Analysis #}
+            {{ order_components.image_analysis(order.delivery_proof_analysis) }}
+        </div>
+        {% endif %}
+
+        {# Delivery Metrics #}
+        {{ order_components.delivery_metrics(order) }}
+        </div>
+    </div>
+
+    {# Delivery Timeline #}
+    {{ order_components.delivery_timeline(logs, 'indigo') }}
+    </div>
+</div>
+{% endblock %}

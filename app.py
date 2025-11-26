@@ -48,6 +48,40 @@ def role_required(*roles):
     return decorator
 
 
+def auto_transition_order_statuses():
+    """Automatically transition orders from picked_up to in_transit after 3 seconds"""
+    from datetime import timedelta
+
+    # Find all orders with status 'picked_up'
+    picked_up_orders = Order.query.filter_by(status='picked_up').all()
+
+    for order in picked_up_orders:
+        if order.picked_up_at:
+            # Calculate time elapsed since pickup
+            time_elapsed = datetime.utcnow() - order.picked_up_at
+
+            # If more than 3 seconds have passed, transition to in_transit
+            if time_elapsed.total_seconds() >= 3:
+                old_status = order.status
+                order.status = 'in_transit'
+                order.in_transit_at = datetime.utcnow()
+
+                # Log the automatic status change
+                log_entry = DeliveryLog(
+                    order_id=order.id,
+                    event_type='status_change',
+                    event_description=f'Status automatically changed from {old_status} to in_transit',
+                    old_status=old_status,
+                    new_status='in_transit',
+                    timestamp=datetime.utcnow()
+                )
+                db.session.add(log_entry)
+
+    # Commit all changes
+    if picked_up_orders:
+        db.session.commit()
+
+
 # ==================== Authentication Routes ====================
 
 @app.route('/')
@@ -117,6 +151,9 @@ def dashboard():
 @role_required('admin')
 def admin_dashboard():
     """Admin dashboard with full system oversight"""
+    # Auto-transition orders from picked_up to in_transit
+    auto_transition_order_statuses()
+
     orders_page = request.args.get('orders_page', 1, type=int)
     logs_page = request.args.get('logs_page', 1, type=int)
     per_page = 10
@@ -210,6 +247,19 @@ def admin_orders():
                          search_query=search_query,
                          date_from=date_from,
                          date_to=date_to)
+
+
+@app.route('/admin/order/<int:order_id>')
+@role_required('admin')
+def admin_view_order(order_id):
+    """View order details (admin)"""
+    # Auto-transition orders from picked_up to in_transit
+    auto_transition_order_statuses()
+
+    order = Order.query.get_or_404(order_id)
+    logs = DeliveryLog.query.filter_by(order_id=order.id).order_by(DeliveryLog.timestamp.desc()).all()
+
+    return render_template('admin/view_order.html', order=order, logs=logs)
 
 
 @app.route('/admin/users')
@@ -376,6 +426,9 @@ def admin_toggle_courier_availability(courier_id):
 @role_required('restaurant')
 def restaurant_dashboard():
     """Restaurant dashboard - show only active orders"""
+    # Auto-transition orders from picked_up to in_transit
+    auto_transition_order_statuses()
+
     # Only show active orders (not delivered, not cancelled)
     active_orders_list = Order.query.filter_by(restaurant_id=current_user.id).filter(
         Order.status.in_(['pending', 'assigned', 'picked_up', 'in_transit'])
@@ -446,7 +499,7 @@ def restaurant_create_order():
             pickup_address=request.form.get('pickup_address', current_user.current_location or ''),
             items_description=request.form.get('items_description'),
             special_instructions=request.form.get('special_instructions'),
-            order_value=float(request.form.get('order_value', 0)),
+            order_value=float(request.form.get('order_value') or 0),
             status='pending'
         )
 
@@ -545,6 +598,9 @@ def restaurant_order_history():
 @role_required('restaurant')
 def restaurant_view_order(order_id):
     """View order details"""
+    # Auto-transition orders from picked_up to in_transit
+    auto_transition_order_statuses()
+
     order = Order.query.get_or_404(order_id)
 
     # Ensure restaurant can only view their own orders
@@ -581,7 +637,7 @@ def restaurant_edit_order(order_id):
         order.pickup_address = request.form.get('pickup_address')
         order.items_description = request.form.get('items_description')
         order.special_instructions = request.form.get('special_instructions')
-        order.order_value = float(request.form.get('order_value', 0))
+        order.order_value = float(request.form.get('order_value') or 0)
 
         # Log the edit
         log_entry = DeliveryLog(
@@ -690,6 +746,9 @@ def restaurant_update_order_status(order_id):
 @role_required('courier')
 def courier_dashboard():
     """Courier dashboard - only shows active orders"""
+    # Auto-transition orders from picked_up to in_transit
+    auto_transition_order_statuses()
+
     # Only show active orders
     active_orders = Order.query.filter_by(courier_id=current_user.id).filter(
         Order.status.in_(['assigned', 'picked_up', 'in_transit'])
@@ -751,6 +810,33 @@ def courier_update_order_status(order_id):
             filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
             file.save(filepath)
             order.delivery_proof_photo = filename
+
+            # Process image (GPS extraction, quality check, privacy protection)
+            try:
+                from image_processing import process_delivery_image
+                analysis_result = process_delivery_image(filepath, apply_privacy_protection=True)
+                order.delivery_proof_analysis = {
+                    'gps_verified': analysis_result['metadata']['has_gps'],
+                    'gps_latitude': analysis_result['metadata']['gps_latitude'],
+                    'gps_longitude': analysis_result['metadata']['gps_longitude'],
+                    'gps_note': analysis_result['metadata']['gps_note'],
+                    'quality_score': analysis_result['quality']['quality_score'],
+                    'quality_acceptable': analysis_result['quality']['is_acceptable'],
+                    'quality_issues': analysis_result['quality']['issues'],
+                    'faces_blurred': analysis_result['privacy']['faces_blurred'],
+                    'summary': analysis_result['summary']
+                }
+            except Exception as e:
+                # If processing fails (e.g., Pillow not installed), still allow upload
+                order.delivery_proof_analysis = {
+                    'error': str(e),
+                    'gps_note': 'Image processing not available - install Pillow to enable',
+                    'quality_score': 0,
+                    'quality_acceptable': True,  # Don't block uploads
+                    'quality_issues': [],
+                    'faces_blurred': 0,
+                    'summary': 'Image uploaded (processing unavailable)'
+                }
 
             # Log photo upload
             log_entry = DeliveryLog(
@@ -857,6 +943,9 @@ def courier_order_history():
 @role_required('courier')
 def courier_view_order(order_id):
     """View order details"""
+    # Auto-transition orders from picked_up to in_transit
+    auto_transition_order_statuses()
+
     order = Order.query.get_or_404(order_id)
 
     # Ensure courier can only view their assigned orders

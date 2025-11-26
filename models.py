@@ -67,6 +67,7 @@ class Order(db.Model):
 
     # Delivery proof
     delivery_proof_photo = db.Column(db.String(255))  # Path to uploaded photo
+    delivery_proof_analysis = db.Column(db.JSON)  # Image analysis results (GPS, quality, privacy)
 
     # Timestamps (critical for AI analysis)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)

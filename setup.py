@@ -38,8 +38,8 @@ def main():
         if response.lower() != 'y':
             return
 
-    # Install dependencies
-    if not run_command(f"{sys.executable} -m pip install -r requirements.txt", "Installing dependencies"):
+    # Install dependencies (use pre-built binaries only)
+    if not run_command(f"{sys.executable} -m pip install --only-binary :all: -r requirements.txt", "Installing dependencies"):
         print("\nFailed to install dependencies!")
         return
 

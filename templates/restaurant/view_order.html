@@ -1,137 +1,53 @@
 {% extends "base.html" %}
+{% import "components/order_components.html" as order_components %}
 
 {% block title %}Order {{ order.order_number }}{% endblock %}
 
 {% block content %}
 <div class="py-6">
     <div class="mx-auto max-w-5xl px-4 sm:px-6 lg:px-8">
-        <div class="mb-4">
-            <a href="{{ url_for('restaurant_dashboard') }}" class="text-sm text-green-600 hover:text-green-500">
-                ← Back to Orders
-            </a>
-        </div>
 
-        <div class="bg-white shadow sm:rounded-lg">
-            <div class="px-4 py-5 sm:p-6">
-                <div class="sm:flex sm:items-center sm:justify-between">
-                    <div>
-                        <h2 class="text-2xl font-bold text-gray-900">{{ order.order_number }}</h2>
-                        <p class="mt-1 text-sm text-gray-500">Created on {{ order.created_at.strftime('%Y-%m-%d at %H:%M') }}</p>
-                    </div>
-                    <div class="mt-4 sm:mt-0 flex items-center space-x-3">
-                        <span class="inline-flex rounded-full px-4 py-2 text-sm font-semibold
-                            {% if order.status == 'delivered' %}bg-green-100 text-green-800
-                            {% elif order.status == 'pending' %}bg-yellow-100 text-yellow-800
-                            {% elif order.status == 'cancelled' %}bg-red-100 text-red-800
-                            {% elif order.status in ['assigned', 'picked_up', 'in_transit'] %}bg-blue-100 text-blue-800
-                            {% else %}bg-gray-100 text-gray-800{% endif %}">
-                            {{ order.status|replace('_', ' ')|title }}
-                        </span>
-
-                        {% if order.status in ['pending', 'assigned'] %}
-                        <div class="flex space-x-2">
-                            <a href="{{ url_for('restaurant_edit_order', order_id=order.id) }}"
-                               class="inline-flex items-center rounded-md bg-indigo-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500">
-                                Edit
-                            </a>
-                            {% if order.status == 'assigned' %}
-                            <button onclick="markAsPickedUp()"
-                                    class="inline-flex items-center rounded-md bg-green-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-green-500">
-                                Mark as Picked Up
-                            </button>
-                            {% endif %}
-                            <button onclick="showCancelModal()"
-                                    class="inline-flex items-center rounded-md bg-red-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-red-500">
-                                Cancel Order
-                            </button>
-                        </div>
-                        {% endif %}
-                    </div>
-                </div>
-
-                <div class="mt-6 border-t border-gray-200 pt-6">
-                    <dl class="grid grid-cols-1 gap-x-4 gap-y-6 sm:grid-cols-2">
-                        <div>
-                            <dt class="text-sm font-medium text-gray-500">Customer Name</dt>
-                            <dd class="mt-1 text-sm text-gray-900">{{ order.customer_name }}</dd>
-                        </div>
-                        <div>
-                            <dt class="text-sm font-medium text-gray-500">Customer Phone</dt>
-                            <dd class="mt-1 text-sm text-gray-900">{{ order.customer_phone }}</dd>
-                        </div>
-                        <div>
-                            <dt class="text-sm font-medium text-gray-500">Pickup Address</dt>
-                            <dd class="mt-1 text-sm text-gray-900">{{ order.pickup_address }}</dd>
-                        </div>
-                        <div>
-                            <dt class="text-sm font-medium text-gray-500">Delivery Address</dt>
-                            <dd class="mt-1 text-sm text-gray-900">{{ order.delivery_address }}</dd>
-                        </div>
-                        <div>
-                            <dt class="text-sm font-medium text-gray-500">Assigned Courier</dt>
-                            <dd class="mt-1 text-sm text-gray-900">
-                                {% if order.courier_user %}
-                                    {{ order.courier_user.full_name }}
-                                {% else %}
-                                    <span class="text-yellow-600">Not assigned yet</span>
-                                {% endif %}
-                            </dd>
-                        </div>
-                        <div>
-                            <dt class="text-sm font-medium text-gray-500">Order Value</dt>
-                            <dd class="mt-1 text-sm text-gray-900">${{ "%.2f"|format(order.order_value) }}</dd>
-                        </div>
-                        {% if order.items_description %}
-                        <div class="sm:col-span-2">
-                            <dt class="text-sm font-medium text-gray-500">Items</dt>
-                            <dd class="mt-1 text-sm text-gray-900">{{ order.items_description }}</dd>
-                        </div>
-                        {% endif %}
-                        {% if order.special_instructions %}
-                        <div class="sm:col-span-2">
-                            <dt class="text-sm font-medium text-gray-500">Special Instructions</dt>
-                            <dd class="mt-1 text-sm text-gray-900">{{ order.special_instructions }}</dd>
-                        </div>
-                        {% endif %}
-                    </dl>
-                </div>
+        {# Order Header with Action Buttons #}
+        {% call order_components.order_header(order, url_for('restaurant_dashboard'), '← Back to Orders') %}
+            {% if order.status in ['pending', 'assigned'] %}
+            <div class="flex space-x-2">
+                <a href="{{ url_for('restaurant_edit_order', order_id=order.id) }}"
+                   class="inline-flex items-center rounded-md bg-indigo-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500">
+                    Edit
+                </a>
+                {% if order.status == 'assigned' %}
+                <button onclick="markAsPickedUp()"
+                        class="inline-flex items-center rounded-md bg-green-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-green-500">
+                    Mark as Picked Up
+                </button>
+                {% endif %}
+                <button onclick="showCancelModal()"
+                        class="inline-flex items-center rounded-md bg-red-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-red-500">
+                    Cancel Order
+                </button>
             </div>
-        </div>
+            {% endif %}
+        {% endcall %}
 
-        <!-- Delivery Timeline -->
-        <div class="mt-8">
-            <h3 class="text-lg font-medium text-gray-900 mb-4">Delivery Timeline</h3>
-            <div class="flow-root">
-                <ul role="list" class="-mb-8">
-                    {% for log in logs %}
-                    <li>
-                        <div class="relative pb-8">
-                            {% if not loop.last %}
-                            <span class="absolute top-4 left-4 -ml-px h-full w-0.5 bg-gray-200" aria-hidden="true"></span>
-                            {% endif %}
-                            <div class="relative flex space-x-3">
-                                <div>
-                                    <span class="h-8 w-8 rounded-full bg-green-500 flex items-center justify-center ring-8 ring-white">
-                                        <svg class="h-5 w-5 text-white" fill="currentColor" viewBox="0 0 20 20">
-                                            <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd" />
-                                        </svg>
-                                    </span>
-                                </div>
-                                <div class="flex min-w-0 flex-1 justify-between space-x-4 pt-1.5">
-                                    <div>
-                                        <p class="text-sm text-gray-500">{{ log.event_description }}</p>
-                                    </div>
-                                    <div class="whitespace-nowrap text-right text-sm text-gray-500">
-                                        <time>{{ log.timestamp.strftime('%H:%M:%S') }}</time>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    </li>
-                    {% endfor %}
-                </ul>
-            </div>
+        {# Order Details #}
+        {{ order_components.order_details(order, [
+            'customer_name',
+            'customer_phone',
+            'pickup_address',
+            'delivery_address',
+            'courier',
+            'order_value',
+            'items_description',
+            'special_instructions'
+        ]) }}
+
+        {# Delivery Metrics #}
+        {{ order_components.delivery_metrics(order) }}
         </div>
+    </div>
+
+    {# Delivery Timeline #}
+    {{ order_components.delivery_timeline(logs, 'green') }}
     </div>
 </div>
 
@@ -209,27 +125,6 @@ function markAsPickedUp() {
     form.appendChild(statusInput);
     document.body.appendChild(form);
     form.submit();
-
-    // After form submission, the page will reload and show "picked_up" status
-    // Then we'll auto-change to "in_transit" after 3 seconds
 }
-
-// Auto-change from picked_up to in_transit after 3 seconds
-{% if order.status == 'picked_up' %}
-setTimeout(function() {
-    const form = document.createElement('form');
-    form.method = 'POST';
-    form.action = '{{ url_for("restaurant_update_order_status", order_id=order.id) }}';
-
-    const statusInput = document.createElement('input');
-    statusInput.type = 'hidden';
-    statusInput.name = 'status';
-    statusInput.value = 'in_transit';
-
-    form.appendChild(statusInput);
-    document.body.appendChild(form);
-    form.submit();
-}, 3000); // 3 seconds
-{% endif %}
 </script>
 {% endblock %}
