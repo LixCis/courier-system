@@ -23,13 +23,33 @@
             'special_instructions'
         ]) }}
 
-        {# Status Update Form #}
+        {# Status Update Actions #}
         {% if order.status != 'delivered' %}
         <div class="mt-6 border-t border-gray-200 pt-6">
             <h3 class="text-lg font-medium text-gray-900 mb-4">Update Delivery Status</h3>
 
-            {% if order.status == 'in_transit' %}
-            <!-- Quick Complete Button for In Transit Orders -->
+            {% if order.status == 'assigned' %}
+            <!-- Mark as Picked Up Button -->
+            <button onclick="updateStatus('picked_up')"
+                    class="w-full inline-flex justify-center items-center rounded-md border border-transparent bg-blue-600 px-6 py-3 text-base font-semibold text-white shadow-sm hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2">
+                <svg class="h-5 w-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                Mark as Picked Up
+            </button>
+
+            {% elif order.status == 'picked_up' %}
+            <!-- Mark as In Transit Button -->
+            <button onclick="updateStatus('in_transit')"
+                    class="w-full inline-flex justify-center items-center rounded-md border border-transparent bg-indigo-600 px-6 py-3 text-base font-semibold text-white shadow-sm hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2">
+                <svg class="h-5 w-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7l5 5m0 0l-5 5m5-5H6" />
+                </svg>
+                Mark as In Transit
+            </button>
+
+            {% elif order.status == 'in_transit' %}
+            <!-- Mark as Delivered Button with Photo Upload -->
             <form action="{{ url_for('courier_update_order_status', order_id=order.id) }}" method="POST" enctype="multipart/form-data">
                 <input type="hidden" name="status" value="delivered">
 
@@ -50,24 +70,6 @@
                     </svg>
                     Mark as Delivered
                 </button>
-            </form>
-            {% else %}
-            <!-- Regular Status Update -->
-            <form action="{{ url_for('courier_update_order_status', order_id=order.id) }}" method="POST">
-                <div class="flex items-center space-x-4">
-                    <select name="status" required
-                            class="block rounded-md border-gray-300 py-2 pl-3 pr-10 text-base focus:border-blue-500 focus:outline-none focus:ring-blue-500 sm:text-sm">
-                        {% if order.status == 'assigned' %}
-                            <option value="picked_up">Picked Up</option>
-                        {% elif order.status == 'picked_up' %}
-                            <option value="in_transit">In Transit</option>
-                        {% endif %}
-                    </select>
-                    <button type="submit"
-                            class="inline-flex items-center rounded-md border border-transparent bg-blue-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2">
-                        Update Status
-                    </button>
-                </div>
             </form>
             {% endif %}
         </div>
@@ -95,4 +97,31 @@
     {{ order_components.delivery_timeline(logs, 'blue') }}
     </div>
 </div>
+
+<script>
+function updateStatus(newStatus) {
+    const statusNames = {
+        'picked_up': 'Picked Up',
+        'in_transit': 'In Transit'
+    };
+
+    if (!confirm(`Update order status to ${statusNames[newStatus]}?`)) {
+        return;
+    }
+
+    // Create a form to submit the status change
+    const form = document.createElement('form');
+    form.method = 'POST';
+    form.action = '{{ url_for("courier_update_order_status", order_id=order.id) }}';
+
+    const statusInput = document.createElement('input');
+    statusInput.type = 'hidden';
+    statusInput.name = 'status';
+    statusInput.value = newStatus;
+
+    form.appendChild(statusInput);
+    document.body.appendChild(form);
+    form.submit();
+}
+</script>
 {% endblock %}
