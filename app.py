@@ -15,6 +15,9 @@ app.config.from_object(Config)
 # Initialize server-side sessions
 Session(app)
 
+# Make Python built-ins available in Jinja2 templates
+app.jinja_env.globals.update(min=min, max=max)
+
 # Create upload folder if it doesn't exist
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 
@@ -53,22 +56,34 @@ def role_required(*roles):
 
 
 def auto_transition_order_statuses():
-    """Automatically transition orders from picked_up to in_transit after 3 seconds"""
+    """Automatically transition orders from picked_up to in_transit after 3 seconds
+    Returns set of order IDs that were recently transitioned (within last 10 seconds)"""
     from datetime import timedelta
 
     # Find all orders with status 'picked_up'
     picked_up_orders = Order.query.filter_by(status='picked_up').all()
 
+    if picked_up_orders:
+        print(f"[auto_transition] Found {len(picked_up_orders)} orders with status 'picked_up'")
+
+    transitions_made = 0
+    transitioned_order_ids = set()
+
     for order in picked_up_orders:
         if order.picked_up_at:
             # Calculate time elapsed since pickup
             time_elapsed = datetime.utcnow() - order.picked_up_at
+            seconds = time_elapsed.total_seconds()
+
+            print(f"[auto_transition] Order #{order.order_number}: picked_up_at={order.picked_up_at}, elapsed={seconds:.1f}s")
 
             # If more than 3 seconds have passed, transition to in_transit
-            if time_elapsed.total_seconds() >= 3:
+            if seconds >= 3:
                 old_status = order.status
                 order.status = 'in_transit'
                 order.in_transit_at = datetime.utcnow()
+
+                print(f"[auto_transition] >> Transitioning Order #{order.order_number} from {old_status} to in_transit")
 
                 # Log the automatic status change
                 log_entry = DeliveryLog(
@@ -80,10 +95,28 @@ def auto_transition_order_statuses():
                     timestamp=datetime.utcnow()
                 )
                 db.session.add(log_entry)
+                transitions_made += 1
+                transitioned_order_ids.add(order.id)
 
     # Commit all changes
-    if picked_up_orders:
+    if transitions_made > 0:
         db.session.commit()
+        print(f"[auto_transition] Committed {transitions_made} transitions")
+
+    # Also include orders that transitioned recently (within last 10 seconds)
+    # This catches orders that transitioned between button click and page load
+    recent_transitions = Order.query.filter(
+        Order.status == 'in_transit',
+        Order.in_transit_at.isnot(None)
+    ).all()
+
+    for order in recent_transitions:
+        if order.in_transit_at:
+            time_since_transition = datetime.utcnow() - order.in_transit_at
+            if time_since_transition.total_seconds() <= 10:
+                transitioned_order_ids.add(order.id)
+
+    return transitioned_order_ids
 
 
 # ==================== Authentication Routes ====================
@@ -973,6 +1006,282 @@ def not_found_error(error):
 def internal_error(error):
     db.session.rollback()
     return render_template('errors/500.html'), 500
+
+
+# ==================== API Routes (for AJAX polling) ====================
+
+@app.route('/api/admin/dashboard-data')
+@role_required('admin')
+def api_admin_dashboard_data():
+    """API endpoint for admin dashboard real-time data"""
+    auto_transition_order_statuses()
+
+    # Statistics
+    total_orders = Order.query.count()
+    pending_orders = Order.query.filter_by(status='pending').count()
+    active_orders = Order.query.filter(Order.status.in_(['assigned', 'picked_up', 'in_transit'])).count()
+    completed_orders = Order.query.filter_by(status='delivered').count()
+    total_couriers = User.query.filter_by(role='courier').count()
+    available_couriers = User.query.filter_by(role='courier', is_available=True).count()
+    total_restaurants = User.query.filter_by(role='restaurant').count()
+
+    # Recent orders (last 10)
+    recent_orders = Order.query.order_by(Order.created_at.desc()).limit(10).all()
+
+    # Recent logs (last 15)
+    recent_logs = DeliveryLog.query.order_by(DeliveryLog.timestamp.desc()).limit(15).all()
+
+    from flask import jsonify
+    return jsonify({
+        'statistics': {
+            'total_orders': total_orders,
+            'pending_orders': pending_orders,
+            'active_orders': active_orders,
+            'completed_orders': completed_orders,
+            'total_couriers': total_couriers,
+            'available_couriers': available_couriers,
+            'total_restaurants': total_restaurants
+        },
+        'recent_orders': [{
+            'id': order.id,
+            'order_number': order.order_number,
+            'restaurant_name': order.restaurant_name,
+            'customer_name': order.customer_name,
+            'status': order.status,
+            'courier_name': order.courier_user.full_name if order.courier_user else None,
+            'created_at': order.created_at.isoformat(),
+            'order_value': order.order_value
+        } for order in recent_orders],
+        'recent_logs': [{
+            'id': log.id,
+            'order_id': log.order_id,
+            'order_number': log.order.order_number if log.order else None,
+            'event_type': log.event_type,
+            'event_description': log.event_description,
+            'timestamp': log.timestamp.isoformat()
+        } for log in recent_logs]
+    })
+
+
+@app.route('/api/admin/order/<int:order_id>')
+@role_required('admin')
+def api_admin_order_detail(order_id):
+    """API endpoint for order detail real-time data"""
+    transitioned_ids = auto_transition_order_statuses()
+    db.session.expire_all()  # Clear cache to get fresh data
+
+    order = Order.query.get_or_404(order_id)
+    logs = DeliveryLog.query.filter_by(order_id=order.id).order_by(DeliveryLog.timestamp.desc()).all()
+
+    from flask import jsonify
+    return jsonify({
+        'auto_transitioned': order.id in transitioned_ids,  # Flag if this order just transitioned
+        'order': {
+            'id': order.id,
+            'order_number': order.order_number,
+            'status': order.status,
+            'restaurant_name': order.restaurant_name,
+            'customer_name': order.customer_name,
+            'customer_phone': order.customer_phone,
+            'delivery_address': order.delivery_address,
+            'pickup_address': order.pickup_address,
+            'courier_name': order.courier_user.full_name if order.courier_user else None,
+            'courier_id': order.courier_id,
+            'order_value': order.order_value,
+            'items_description': order.items_description,
+            'special_instructions': order.special_instructions,
+            'created_at': order.created_at.isoformat() if order.created_at else None,
+            'assigned_at': order.assigned_at.isoformat() if order.assigned_at else None,
+            'picked_up_at': order.picked_up_at.isoformat() if order.picked_up_at else None,
+            'in_transit_at': order.in_transit_at.isoformat() if order.in_transit_at else None,
+            'delivered_at': order.delivered_at.isoformat() if order.delivered_at else None
+        },
+        'logs': [{
+            'id': log.id,
+            'event_type': log.event_type,
+            'event_description': log.event_description,
+            'old_status': log.old_status,
+            'new_status': log.new_status,
+            'timestamp': log.timestamp.isoformat()
+        } for log in logs]
+    })
+
+
+@app.route('/api/restaurant/dashboard-data')
+@role_required('restaurant')
+def api_restaurant_dashboard_data():
+    """API endpoint for restaurant dashboard real-time data"""
+    auto_transition_order_statuses()
+
+    # Active orders only
+    active_orders_list = Order.query.filter_by(restaurant_id=current_user.id).filter(
+        Order.status.in_(['pending', 'assigned', 'picked_up', 'in_transit'])
+    ).order_by(Order.created_at.desc()).all()
+
+    # Statistics
+    all_orders = Order.query.filter_by(restaurant_id=current_user.id).all()
+    total_orders = len(all_orders)
+    pending_orders = sum(1 for o in all_orders if o.status == 'pending')
+    active_orders = sum(1 for o in all_orders if o.status in ['assigned', 'picked_up', 'in_transit'])
+    completed_orders = sum(1 for o in all_orders if o.status == 'delivered')
+    available_couriers = User.query.filter_by(role='courier', is_available=True, is_active=True).count()
+
+    from flask import jsonify
+    return jsonify({
+        'statistics': {
+            'total_orders': total_orders,
+            'pending_orders': pending_orders,
+            'active_orders': active_orders,
+            'completed_orders': completed_orders,
+            'available_couriers': available_couriers
+        },
+        'active_orders': [{
+            'id': order.id,
+            'order_number': order.order_number,
+            'customer_name': order.customer_name,
+            'customer_phone': order.customer_phone,
+            'delivery_address': order.delivery_address,
+            'status': order.status,
+            'courier_name': order.courier_user.full_name if order.courier_user else None,
+            'created_at': order.created_at.isoformat(),
+            'order_value': order.order_value
+        } for order in active_orders_list]
+    })
+
+
+@app.route('/api/restaurant/order/<int:order_id>')
+@role_required('restaurant')
+def api_restaurant_order_detail(order_id):
+    """API endpoint for restaurant order detail"""
+    transitioned_ids = auto_transition_order_statuses()
+    db.session.expire_all()  # Clear cache to get fresh data
+
+    order = Order.query.get_or_404(order_id)
+
+    # Ensure restaurant can only access their own orders
+    if order.restaurant_id != current_user.id:
+        from flask import jsonify
+        return jsonify({'error': 'Unauthorized'}), 403
+
+    logs = DeliveryLog.query.filter_by(order_id=order.id).order_by(DeliveryLog.timestamp.desc()).all()
+
+    from flask import jsonify
+    return jsonify({
+        'auto_transitioned': order.id in transitioned_ids,  # Flag if this order just transitioned
+        'order': {
+            'id': order.id,
+            'order_number': order.order_number,
+            'status': order.status,
+            'customer_name': order.customer_name,
+            'customer_phone': order.customer_phone,
+            'delivery_address': order.delivery_address,
+            'pickup_address': order.pickup_address,
+            'courier_name': order.courier_user.full_name if order.courier_user else None,
+            'courier_id': order.courier_id,
+            'order_value': order.order_value,
+            'items_description': order.items_description,
+            'special_instructions': order.special_instructions,
+            'created_at': order.created_at.isoformat() if order.created_at else None,
+            'assigned_at': order.assigned_at.isoformat() if order.assigned_at else None,
+            'picked_up_at': order.picked_up_at.isoformat() if order.picked_up_at else None,
+            'in_transit_at': order.in_transit_at.isoformat() if order.in_transit_at else None,
+            'delivered_at': order.delivered_at.isoformat() if order.delivered_at else None
+        },
+        'logs': [{
+            'id': log.id,
+            'event_type': log.event_type,
+            'event_description': log.event_description,
+            'old_status': log.old_status,
+            'new_status': log.new_status,
+            'timestamp': log.timestamp.isoformat()
+        } for log in logs]
+    })
+
+
+@app.route('/api/courier/dashboard-data')
+@role_required('courier')
+def api_courier_dashboard_data():
+    """API endpoint for courier dashboard real-time data"""
+    auto_transition_order_statuses()
+
+    # Active orders
+    active_orders = Order.query.filter_by(courier_id=current_user.id).filter(
+        Order.status.in_(['assigned', 'picked_up', 'in_transit'])
+    ).order_by(Order.created_at.desc()).all()
+
+    # Completed today
+    all_orders = Order.query.filter_by(courier_id=current_user.id).all()
+    completed_today = [o for o in all_orders if o.status == 'delivered' and
+                      o.delivered_at and o.delivered_at.date() == datetime.utcnow().date()]
+
+    from flask import jsonify
+    return jsonify({
+        'statistics': {
+            'active_orders_count': len(active_orders),
+            'completed_today_count': len(completed_today),
+            'is_available': current_user.is_available
+        },
+        'active_orders': [{
+            'id': order.id,
+            'order_number': order.order_number,
+            'restaurant_name': order.restaurant_name,
+            'customer_name': order.customer_name,
+            'customer_phone': order.customer_phone,
+            'delivery_address': order.delivery_address,
+            'pickup_address': order.pickup_address,
+            'status': order.status,
+            'created_at': order.created_at.isoformat(),
+            'order_value': order.order_value
+        } for order in active_orders]
+    })
+
+
+@app.route('/api/courier/order/<int:order_id>')
+@role_required('courier')
+def api_courier_order_detail(order_id):
+    """API endpoint for courier order detail"""
+    transitioned_ids = auto_transition_order_statuses()
+    db.session.expire_all()  # Clear cache to get fresh data
+
+    order = Order.query.get_or_404(order_id)
+
+    # Ensure courier can only access their assigned orders
+    if order.courier_id != current_user.id:
+        from flask import jsonify
+        return jsonify({'error': 'Unauthorized'}), 403
+
+    logs = DeliveryLog.query.filter_by(order_id=order.id).order_by(DeliveryLog.timestamp.desc()).all()
+
+    from flask import jsonify
+    return jsonify({
+        'auto_transitioned': order.id in transitioned_ids,  # Flag if this order just transitioned
+        'order': {
+            'id': order.id,
+            'order_number': order.order_number,
+            'status': order.status,
+            'restaurant_name': order.restaurant_name,
+            'customer_name': order.customer_name,
+            'customer_phone': order.customer_phone,
+            'delivery_address': order.delivery_address,
+            'pickup_address': order.pickup_address,
+            'order_value': order.order_value,
+            'items_description': order.items_description,
+            'special_instructions': order.special_instructions,
+            'created_at': order.created_at.isoformat() if order.created_at else None,
+            'assigned_at': order.assigned_at.isoformat() if order.assigned_at else None,
+            'picked_up_at': order.picked_up_at.isoformat() if order.picked_up_at else None,
+            'in_transit_at': order.in_transit_at.isoformat() if order.in_transit_at else None,
+            'delivered_at': order.delivered_at.isoformat() if order.delivered_at else None
+        },
+        'logs': [{
+            'id': log.id,
+            'event_type': log.event_type,
+            'event_description': log.event_description,
+            'old_status': log.old_status,
+            'new_status': log.new_status,
+            'timestamp': log.timestamp.isoformat()
+        } for log in logs]
+    })
 
 
 # ==================== Database Initialization ====================

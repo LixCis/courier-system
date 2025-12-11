@@ -27,30 +27,30 @@
         <div class="mt-6 grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-5">
             <div class="overflow-hidden rounded-lg bg-white shadow p-5">
                 <p class="text-sm font-medium text-gray-500">Total Orders</p>
-                <p class="mt-1 text-3xl font-semibold text-gray-900">{{ total_orders }}</p>
+                <p class="mt-1 text-3xl font-semibold text-gray-900" data-metric="total_orders">{{ total_orders }}</p>
             </div>
             <div class="overflow-hidden rounded-lg bg-white shadow p-5">
                 <p class="text-sm font-medium text-gray-500">Pending</p>
-                <p class="mt-1 text-3xl font-semibold text-yellow-600">{{ pending_orders }}</p>
+                <p class="mt-1 text-3xl font-semibold text-yellow-600" data-metric="pending_orders">{{ pending_orders }}</p>
             </div>
             <div class="overflow-hidden rounded-lg bg-white shadow p-5">
                 <p class="text-sm font-medium text-gray-500">In Progress</p>
-                <p class="mt-1 text-3xl font-semibold text-blue-600">{{ active_orders }}</p>
+                <p class="mt-1 text-3xl font-semibold text-blue-600" data-metric="active_orders">{{ active_orders }}</p>
             </div>
             <div class="overflow-hidden rounded-lg bg-white shadow p-5">
                 <p class="text-sm font-medium text-gray-500">Completed</p>
-                <p class="mt-1 text-3xl font-semibold text-green-600">{{ completed_orders }}</p>
+                <p class="mt-1 text-3xl font-semibold text-green-600" data-metric="completed_orders">{{ completed_orders }}</p>
             </div>
             <div class="overflow-hidden rounded-lg bg-green-50 border-2 border-green-200 shadow p-5">
                 <p class="text-sm font-medium text-green-700">Available Couriers</p>
-                <p class="mt-1 text-3xl font-semibold text-green-600">{{ available_couriers }}</p>
+                <p class="mt-1 text-3xl font-semibold text-green-600" data-metric="available_couriers">{{ available_couriers }}</p>
             </div>
         </div>
 
         <!-- Orders List -->
         <div class="mt-8">
             <div class="bg-white shadow overflow-hidden sm:rounded-md">
-                <ul role="list" class="divide-y divide-gray-200">
+                <ul role="list" class="divide-y divide-gray-200" id="active-orders-list" data-orders-list="active">
                     {% for order in orders %}
                     <li>
                         <a href="{{ url_for('restaurant_view_order', order_id=order.id) }}" class="block hover:bg-gray-50">
@@ -101,4 +101,120 @@
         </div>
     </div>
 </div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+// Restaurant Dashboard Auto-Refresh
+(function() {
+    console.log('[restaurant-dashboard] Initializing polling...');
+
+    // Initialize from DOM before polling starts
+    initializeLastDataFromDOM();
+
+    let statsUpdateCounter = 0;
+
+    window.autoRefresh.start('restaurant-dashboard', '/api/restaurant/dashboard-data', (data, hasChanged) => {
+        console.log(`[restaurant-dashboard] Callback: hasChanged=${hasChanged}`);
+
+        if (!hasChanged) {
+            console.log('[restaurant-dashboard] No change detected');
+            return;
+        }
+
+        console.log('[restaurant-dashboard] Data changed! Updating UI...');
+
+        // Update statistics every 5th poll (= 5 seconds)
+        statsUpdateCounter++;
+        if (statsUpdateCounter >= 5) {
+            statsUpdateCounter = 0;
+            updateStatistics(data.statistics);
+        }
+
+        // Update orders list every poll (= 1 second)
+        updateOrdersList(data.active_orders);
+    }, 1000);
+
+    function initializeLastDataFromDOM() {
+        const statistics = {};
+        document.querySelectorAll('[data-metric]').forEach(el => {
+            const key = el.getAttribute('data-metric');
+            statistics[key] = parseInt(el.textContent) || 0;
+        });
+
+        // Read actual order data from DOM
+        const orderItems = document.querySelectorAll('#active-orders-list li:not(.text-center)');
+        const orders = Array.from(orderItems).map(li => {
+            const orderNumber = li.querySelector('.text-green-600')?.textContent || '';
+            const status = li.querySelector('.inline-flex')?.textContent.trim() || '';
+            return {
+                order_number: orderNumber,
+                status: status.toLowerCase().replace(' ', '_')
+            };
+        });
+
+        const initialData = {
+            statistics: statistics,
+            active_orders: orders
+        };
+
+        window.autoRefresh.lastData['restaurant-dashboard'] = JSON.stringify(initialData);
+        console.log('[restaurant-dashboard] Initialized lastData from DOM:', initialData);
+    }
+
+    function updateStatistics(stats) {
+        Object.keys(stats).forEach(key => {
+            const element = document.querySelector(`[data-metric="${key}"]`);
+            if (element && element.textContent != stats[key]) {
+                element.textContent = stats[key];
+                window.autoRefresh.highlightElement(element);
+            }
+        });
+    }
+
+    function updateOrdersList(orders) {
+        const list = document.getElementById('active-orders-list');
+        if (!list) return;
+
+        const html = orders.map(order => `
+            <li>
+                <a href="/restaurant/order/${order.id}" class="block hover:bg-gray-50">
+                    <div class="px-4 py-4 sm:px-6">
+                        <div class="flex items-center justify-between">
+                            <div class="flex-1">
+                                <p class="text-sm font-medium text-green-600">${order.order_number}</p>
+                                <p class="text-sm text-gray-500 mt-1">Customer: ${order.customer_name}</p>
+                                <p class="text-xs text-gray-400 mt-1">${order.delivery_address}</p>
+                            </div>
+                            <div class="ml-2 flex-shrink-0">
+                                ${createStatusBadge(order.status)}
+                            </div>
+                        </div>
+                        <div class="mt-2 sm:flex sm:justify-between">
+                            <div class="sm:flex">
+                                <p class="flex items-center text-sm text-gray-500">
+                                    ${order.courier_name ? `Courier: ${order.courier_name}` : '<span class="text-yellow-600">Waiting for courier assignment</span>'}
+                                </p>
+                            </div>
+                            <div class="mt-2 flex items-center text-sm text-gray-500 sm:mt-0">
+                                <p>${formatDateTime(order.created_at)}</p>
+                            </div>
+                        </div>
+                    </div>
+                </a>
+            </li>
+        `).join('');
+
+        list.innerHTML = html || `
+            <li class="px-4 py-8 text-center">
+                <p class="text-gray-500">No orders yet</p>
+                <a href="/restaurant/order/create" class="mt-2 inline-block text-green-600 hover:text-green-500">
+                    Create your first order
+                </a>
+            </li>`;
+    }
+
+    console.log('Restaurant dashboard polling started');
+})();
+</script>
 {% endblock %}

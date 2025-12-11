@@ -25,7 +25,7 @@
                             <div class="ml-5 w-0 flex-1">
                                 <dl>
                                     <dt class="truncate text-sm font-medium text-gray-500">Total Orders</dt>
-                                    <dd class="text-3xl font-semibold text-gray-900">{{ total_orders }}</dd>
+                                    <dd class="text-3xl font-semibold text-gray-900" data-metric="total_orders">{{ total_orders }}</dd>
                                 </dl>
                             </div>
                         </div>
@@ -46,7 +46,7 @@
                             <div class="ml-5 w-0 flex-1">
                                 <dl>
                                     <dt class="truncate text-sm font-medium text-gray-500">Pending</dt>
-                                    <dd class="text-3xl font-semibold text-gray-900">{{ pending_orders }}</dd>
+                                    <dd class="text-3xl font-semibold text-gray-900" data-metric="pending_orders">{{ pending_orders }}</dd>
                                 </dl>
                             </div>
                         </div>
@@ -67,7 +67,7 @@
                             <div class="ml-5 w-0 flex-1">
                                 <dl>
                                     <dt class="truncate text-sm font-medium text-gray-500">Active</dt>
-                                    <dd class="text-3xl font-semibold text-gray-900">{{ active_orders }}</dd>
+                                    <dd class="text-3xl font-semibold text-gray-900" data-metric="active_orders">{{ active_orders }}</dd>
                                 </dl>
                             </div>
                         </div>
@@ -88,7 +88,7 @@
                             <div class="ml-5 w-0 flex-1">
                                 <dl>
                                     <dt class="truncate text-sm font-medium text-gray-500">Completed</dt>
-                                    <dd class="text-3xl font-semibold text-gray-900">{{ completed_orders }}</dd>
+                                    <dd class="text-3xl font-semibold text-gray-900" data-metric="completed_orders">{{ completed_orders }}</dd>
                                 </dl>
                             </div>
                         </div>
@@ -102,8 +102,8 @@
             <div class="grid grid-cols-1 gap-5 sm:grid-cols-3">
                 <div class="overflow-hidden rounded-lg bg-white shadow p-5">
                     <p class="text-sm font-medium text-gray-500">Total Couriers</p>
-                    <p class="mt-1 text-2xl font-semibold text-gray-900">{{ total_couriers }}</p>
-                    <p class="mt-1 text-sm text-green-600">{{ available_couriers }} available</p>
+                    <p class="mt-1 text-2xl font-semibold text-gray-900" data-metric="total_couriers">{{ total_couriers }}</p>
+                    <p class="mt-1 text-sm text-green-600"><span data-metric="available_couriers">{{ available_couriers }}</span> available</p>
                 </div>
                 <div class="overflow-hidden rounded-lg bg-white shadow p-5">
                     <p class="text-sm font-medium text-gray-500">Total Restaurants</p>
@@ -123,7 +123,7 @@
                 <a href="{{ url_for('admin_orders') }}" class="text-sm text-indigo-600 hover:text-indigo-900">View all →</a>
             </div>
             <div class="bg-white shadow overflow-hidden sm:rounded-md">
-                <ul role="list" class="divide-y divide-gray-200">
+                <ul role="list" class="divide-y divide-gray-200" id="recent-orders-list" data-orders-list="recent">
                     {% for order in orders_pagination.items %}
                     <li>
                         <div class="px-4 py-4 sm:px-6">
@@ -206,7 +206,7 @@
         <div class="mt-8">
             <h2 class="text-lg font-medium text-gray-900 mb-4">Recent Activity</h2>
             <div class="bg-white shadow overflow-hidden sm:rounded-md">
-                <ul role="list" class="divide-y divide-gray-200">
+                <ul role="list" class="divide-y divide-gray-200" id="recent-logs-list" data-logs-list="recent">
                     {% for log in logs_pagination.items %}
                     <li class="px-4 py-3 sm:px-6">
                         <div class="flex items-center justify-between">
@@ -264,4 +264,154 @@
         </div>
     </div>
 </div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+// Admin Dashboard Auto-Refresh
+(function() {
+    console.log('[admin-dashboard] Initializing polling...');
+
+    // Initialize metrics from DOM before polling starts
+    initializeLastDataFromDOM();
+
+    // Poll dashboard data every 1 second (orders) and 5 seconds (stats)
+    let statsUpdateCounter = 0;
+
+    window.autoRefresh.start('admin-dashboard', '/api/admin/dashboard-data', (data, hasChanged) => {
+        console.log(`[admin-dashboard] Callback: hasChanged=${hasChanged}`);
+
+        if (!hasChanged) {
+            console.log('[admin-dashboard] No change detected');
+            return;
+        }
+
+        console.log('[admin-dashboard] Data changed! Updating UI...');
+
+        // Update statistics every 5th poll (= 5 seconds)
+        statsUpdateCounter++;
+        if (statsUpdateCounter >= 5) {
+            console.log('[admin-dashboard] Updating statistics (5th poll)');
+            statsUpdateCounter = 0;
+            updateStatistics(data.statistics);
+        }
+
+        // Update orders and logs every poll (= 1 second)
+        console.log('[admin-dashboard] Updating orders and logs lists');
+        updateOrdersList(data.recent_orders);
+        updateLogsList(data.recent_logs);
+    }, 1000);
+
+    function initializeLastDataFromDOM() {
+        // Read initial statistics from DOM
+        const statistics = {};
+        document.querySelectorAll('[data-metric]').forEach(el => {
+            const key = el.getAttribute('data-metric');
+            statistics[key] = parseInt(el.textContent) || 0;
+        });
+
+        // Read actual order data from DOM
+        const orderItems = document.querySelectorAll('#recent-orders-list li:not(.text-center)');
+        const orders = Array.from(orderItems).map(li => {
+            const orderNumber = li.querySelector('.text-indigo-600')?.textContent || '';
+            const status = li.querySelector('.inline-flex')?.textContent.trim() || '';
+            return {
+                order_number: orderNumber,
+                status: status
+            };
+        });
+
+        // Read actual log data from DOM
+        const logItems = document.querySelectorAll('#recent-logs-list li:not(.text-center)');
+        const logs = Array.from(logItems).map(li => {
+            const description = li.querySelector('.text-gray-900')?.textContent || '';
+            return {
+                event_description: description
+            };
+        });
+
+        // Build initial data structure matching API response
+        const initialData = {
+            statistics: statistics,
+            recent_orders: orders,
+            recent_logs: logs
+        };
+
+        // Store as JSON string (same format as autoRefresh stores it)
+        window.autoRefresh.lastData['admin-dashboard'] = JSON.stringify(initialData);
+        console.log('[admin-dashboard] Initialized lastData from DOM:', initialData);
+    }
+
+    function updateStatistics(stats) {
+        // Update each metric
+        Object.keys(stats).forEach(key => {
+            const element = document.querySelector(`[data-metric="${key}"]`);
+            if (element && element.textContent != stats[key]) {
+                element.textContent = stats[key];
+                window.autoRefresh.highlightElement(element.parentElement);
+            }
+        });
+    }
+
+    function updateOrdersList(orders) {
+        const list = document.getElementById('recent-orders-list');
+        if (!list) return;
+
+        const html = orders.map(order => `
+            <li>
+                <div class="px-4 py-4 sm:px-6">
+                    <div class="flex items-center justify-between">
+                        <div class="flex-1">
+                            <p class="text-sm font-medium text-indigo-600">${order.order_number}</p>
+                            <p class="text-sm text-gray-500">${order.restaurant_name} → ${order.customer_name}</p>
+                        </div>
+                        <div class="ml-2 flex-shrink-0">
+                            ${createStatusBadge(order.status)}
+                        </div>
+                    </div>
+                    <div class="mt-2 sm:flex sm:justify-between">
+                        <div class="sm:flex">
+                            <p class="flex items-center text-sm text-gray-500">
+                                ${order.courier_name ? `Courier: ${order.courier_name}` : 'No courier assigned'}
+                            </p>
+                        </div>
+                        <div class="mt-2 flex items-center text-sm text-gray-500 sm:mt-0">
+                            <p>${formatDateTime(order.created_at)}</p>
+                        </div>
+                    </div>
+                </div>
+            </li>
+        `).join('');
+
+        if (list.innerHTML !== html) {
+            list.innerHTML = html || '<li class="px-4 py-4 sm:px-6 text-center text-gray-500">No orders yet</li>';
+        }
+    }
+
+    function updateLogsList(logs) {
+        const list = document.getElementById('recent-logs-list');
+        if (!list) return;
+
+        const html = logs.map(log => `
+            <li class="px-4 py-3 sm:px-6">
+                <div class="flex items-center justify-between">
+                    <div class="flex-1">
+                        <p class="text-sm text-gray-900">${log.event_description}</p>
+                        <p class="text-xs text-gray-500 mt-1">Order #${log.order_id} - ${log.event_type}</p>
+                    </div>
+                    <div class="ml-2 flex-shrink-0 text-xs text-gray-500">
+                        ${formatRelativeTime(log.timestamp)}
+                    </div>
+                </div>
+            </li>
+        `).join('');
+
+        if (list.innerHTML !== html) {
+            list.innerHTML = html || '<li class="px-4 py-3 sm:px-6 text-center text-gray-500 text-sm">No activity yet</li>';
+        }
+    }
+
+    console.log('Admin dashboard polling started');
+})();
+</script>
 {% endblock %}

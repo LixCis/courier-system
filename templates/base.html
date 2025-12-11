@@ -20,6 +20,25 @@
             }
         }
     </script>
+    <style>
+        /* Highlight flash animation */
+        @keyframes highlight-flash {
+            0%, 100% { background-color: transparent; }
+            50% { background-color: rgba(59, 130, 246, 0.2); }
+        }
+        .highlight-flash {
+            animation: highlight-flash 1s ease-in-out;
+        }
+
+        /* Fade in animation */
+        .fade-in {
+            animation: fadeIn 0.5s ease-in;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+    </style>
 </head>
 <body class="h-full">
     <div class="min-h-full">
@@ -112,6 +131,11 @@
             </p>
         </div>
     </footer>
+
+    <!-- Auto-refresh system -->
+    <script src="{{ url_for('static', filename='js/auto-refresh.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/order-detail-polling.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/page-refresh-polling.js') }}"></script>
 
     {% block extra_js %}{% endblock %}
 </body>

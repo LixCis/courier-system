@@ -30,15 +30,15 @@
         <div class="mt-6 grid grid-cols-1 gap-5 sm:grid-cols-3">
             <div class="overflow-hidden rounded-lg bg-white shadow p-5">
                 <p class="text-sm font-medium text-gray-500">Active Deliveries</p>
-                <p class="mt-1 text-3xl font-semibold text-blue-600">{{ active_orders|length }}</p>
+                <p class="mt-1 text-3xl font-semibold text-blue-600" data-metric="active_orders_count">{{ active_orders|length }}</p>
             </div>
             <div class="overflow-hidden rounded-lg bg-white shadow p-5">
                 <p class="text-sm font-medium text-gray-500">Completed Today</p>
-                <p class="mt-1 text-3xl font-semibold text-green-600">{{ completed_orders|length }}</p>
+                <p class="mt-1 text-3xl font-semibold text-green-600" data-metric="completed_today_count">{{ completed_orders|length }}</p>
             </div>
             <div class="overflow-hidden rounded-lg bg-white shadow p-5">
                 <p class="text-sm font-medium text-gray-500">Status</p>
-                <p class="mt-1 text-2xl font-semibold {% if is_available %}text-green-600{% else %}text-gray-600{% endif %}">
+                <p class="mt-1 text-2xl font-semibold {% if is_available %}text-green-600{% else %}text-gray-600{% endif %}" data-metric="is_available">
                     {% if is_available %}Available{% else %}Unavailable{% endif %}
                 </p>
             </div>
@@ -48,7 +48,7 @@
         <div class="mt-8">
             <h2 class="text-lg font-medium text-gray-900 mb-4">Active Deliveries</h2>
             <div class="bg-white shadow overflow-hidden sm:rounded-md">
-                <ul role="list" class="divide-y divide-gray-200">
+                <ul role="list" class="divide-y divide-gray-200" id="active-orders-list" data-orders-list="active">
                     {% for order in active_orders %}
                     <li>
                         <a href="{{ url_for('courier_view_order', order_id=order.id) }}" class="block hover:bg-gray-50">
@@ -99,4 +99,125 @@
 
     </div>
 </div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+// Courier Dashboard Auto-Refresh
+(function() {
+    console.log('[courier-dashboard] Initializing polling...');
+
+    // Initialize from DOM before polling starts
+    initializeLastDataFromDOM();
+
+    let statsUpdateCounter = 0;
+
+    window.autoRefresh.start('courier-dashboard', '/api/courier/dashboard-data', (data, hasChanged) => {
+        console.log(`[courier-dashboard] Callback: hasChanged=${hasChanged}`);
+
+        if (!hasChanged) {
+            console.log('[courier-dashboard] No change detected');
+            return;
+        }
+
+        console.log('[courier-dashboard] Data changed! Updating UI...');
+
+        // Update statistics every 5th poll
+        statsUpdateCounter++;
+        if (statsUpdateCounter >= 5) {
+            statsUpdateCounter = 0;
+            updateStatistics(data.statistics);
+        }
+
+        // Update orders list every poll
+        updateOrdersList(data.active_orders);
+    }, 1000);
+
+    function initializeLastDataFromDOM() {
+        const statistics = {};
+        document.querySelectorAll('[data-metric]').forEach(el => {
+            const key = el.getAttribute('data-metric');
+            const text = el.textContent.trim();
+            if (key === 'is_available') {
+                statistics[key] = text === 'Available';
+            } else {
+                statistics[key] = parseInt(text) || 0;
+            }
+        });
+
+        // Read actual order data from DOM
+        const orderItems = document.querySelectorAll('#active-orders-list li:not(.text-center)');
+        const orders = Array.from(orderItems).map(li => {
+            const orderNumber = li.querySelector('.text-blue-600')?.textContent || '';
+            const status = li.querySelector('.inline-flex')?.textContent.trim() || '';
+            return {
+                order_number: orderNumber,
+                status: status.toLowerCase().replace(' ', '_')
+            };
+        });
+
+        const initialData = {
+            statistics: statistics,
+            active_orders: orders
+        };
+
+        window.autoRefresh.lastData['courier-dashboard'] = JSON.stringify(initialData);
+        console.log('[courier-dashboard] Initialized lastData from DOM:', initialData);
+    }
+
+    function updateStatistics(stats) {
+        Object.keys(stats).forEach(key => {
+            const element = document.querySelector(`[data-metric="${key}"]`);
+            if (!element) return;
+
+            if (key === 'is_available') {
+                const newText = stats[key] ? 'Available' : 'Unavailable';
+                if (element.textContent.trim() !== newText) {
+                    element.textContent = newText;
+                    element.className = `mt-1 text-2xl font-semibold ${stats[key] ? 'text-green-600' : 'text-gray-600'}`;
+                    window.autoRefresh.highlightElement(element);
+                }
+            } else if (element.textContent != stats[key]) {
+                element.textContent = stats[key];
+                window.autoRefresh.highlightElement(element);
+            }
+        });
+    }
+
+    function updateOrdersList(orders) {
+        const list = document.getElementById('active-orders-list');
+        if (!list) return;
+
+        const html = orders.map(order => `
+            <li>
+                <a href="/courier/order/${order.id}" class="block hover:bg-gray-50">
+                    <div class="px-4 py-4 sm:px-6">
+                        <div class="flex items-center justify-between">
+                            <div class="flex-1">
+                                <p class="text-sm font-medium text-blue-600">${order.order_number}</p>
+                                <p class="text-sm text-gray-500 mt-1">${order.restaurant_name}</p>
+                            </div>
+                            <div class="ml-2 flex-shrink-0">
+                                ${createStatusBadge(order.status)}
+                            </div>
+                        </div>
+                        <div class="mt-2 text-sm text-gray-500">
+                            <p><strong>Customer:</strong> ${order.customer_name} - ${order.customer_phone}</p>
+                            <p><strong>Delivery:</strong> ${order.delivery_address}</p>
+                            <p class="text-xs mt-1">${formatRelativeTime(order.created_at)}</p>
+                        </div>
+                    </div>
+                </a>
+            </li>
+        `).join('');
+
+        list.innerHTML = html || `
+            <li class="px-4 py-8 text-center text-gray-500">
+                No active deliveries
+            </li>`;
+    }
+
+    console.log('Courier dashboard polling started');
+})();
+</script>
 {% endblock %}
