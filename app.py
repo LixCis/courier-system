@@ -1,6 +1,5 @@
 from flask import Flask, render_template, redirect, url_for, flash, request
 from flask_login import LoginManager, login_user, logout_user, login_required, current_user
-from flask_session import Session
 from functools import wraps
 from config import Config
 from models import db, User, Order, DeliveryLog, SavedCustomer
@@ -11,9 +10,6 @@ from werkzeug.utils import secure_filename
 
 app = Flask(__name__)
 app.config.from_object(Config)
-
-# Initialize server-side sessions
-Session(app)
 
 # Make Python built-ins available in Jinja2 templates
 app.jinja_env.globals.update(min=min, max=max)
@@ -813,10 +809,17 @@ def courier_toggle_availability():
 
     if active_orders > 0 and current_user.is_available:
         # Trying to go unavailable while having active orders
-        flash(f'You have {active_orders} active order(s). You will be automatically marked as unavailable after completing all deliveries.', 'warning')
+        # Set pending_unavailable flag and mark as unavailable immediately
+        current_user.pending_unavailable = True
+        current_user.is_available = False
+        db.session.commit()
+
+        flash(f'You have {active_orders} active order(s). You are now unavailable for new orders and will remain unavailable after completing all deliveries.', 'info')
         return redirect(url_for('courier_dashboard'))
 
+    # Normal toggle (no active orders)
     current_user.is_available = not current_user.is_available
+    current_user.pending_unavailable = False  # Clear flag if manually toggling back to available
     db.session.commit()
 
     status = 'available' if current_user.is_available else 'unavailable'
@@ -894,8 +897,23 @@ def courier_update_order_status(order_id):
         order.in_transit_at = datetime.utcnow()
     elif new_status == 'delivered' and not order.delivered_at:
         order.delivered_at = datetime.utcnow()
-        # Make courier available again
-        current_user.is_available = True
+
+        # Check if courier has pending_unavailable flag
+        if current_user.pending_unavailable:
+            # Check if this was the last active order
+            remaining_active = Order.query.filter_by(courier_id=current_user.id).filter(
+                Order.status.in_(['assigned', 'picked_up', 'in_transit']),
+                Order.id != order.id  # Exclude current order (already marked as delivered)
+            ).count()
+
+            if remaining_active == 0:
+                # This was the last order - clear flag and stay unavailable
+                current_user.pending_unavailable = False
+                flash('You have completed all active deliveries and are now marked as unavailable.', 'info')
+            # else: courier still has more orders, stay unavailable for new orders
+        else:
+            # No pending_unavailable flag - make courier available again as normal
+            current_user.is_available = True
 
     # Log the status change
     log_entry = DeliveryLog(
@@ -1219,7 +1237,8 @@ def api_courier_dashboard_data():
         'statistics': {
             'active_orders_count': len(active_orders),
             'completed_today_count': len(completed_today),
-            'is_available': current_user.is_available
+            'is_available': current_user.is_available,
+            'pending_unavailable': current_user.pending_unavailable
         },
         'active_orders': [{
             'id': order.id,
