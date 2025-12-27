@@ -99,7 +99,7 @@ def auto_transition_order_statuses():
         db.session.commit()
         print(f"[auto_transition] Committed {transitions_made} transitions")
 
-    # Also include orders that transitioned recently (within last 10 seconds)
+    # Also include orders that transitioned recently (within last 1 seconds)
     # This catches orders that transitioned between button click and page load
     recent_transitions = Order.query.filter(
         Order.status == 'in_transit',
@@ -109,7 +109,7 @@ def auto_transition_order_statuses():
     for order in recent_transitions:
         if order.in_transit_at:
             time_since_transition = datetime.utcnow() - order.in_transit_at
-            if time_since_transition.total_seconds() <= 10:
+            if time_since_transition.total_seconds() <= 1:  # Reduced from 10 to 1 seconds to prevent reload loop
                 transitioned_order_ids.add(order.id)
 
     return transitioned_order_ids
