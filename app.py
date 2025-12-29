@@ -28,6 +28,10 @@ login_manager.init_app(app)
 login_manager.login_view = 'login'
 login_manager.login_message = 'Please log in to access this page.'
 
+# Initialize background scheduler for pending orders
+from services.order_scheduler import init_scheduler
+scheduler = init_scheduler(app)
+
 
 @login_manager.user_loader
 def load_user(user_id):
@@ -518,6 +522,13 @@ def restaurant_create_order():
                 # Update last used time
                 existing.last_used_at = datetime.utcnow()
 
+        # Get GPS coordinates from map (required)
+        pickup_address = request.form.get('pickup_address')
+        pickup_lat = float(request.form.get('pickup_latitude'))
+        pickup_lon = float(request.form.get('pickup_longitude'))
+        delivery_lat = float(request.form.get('delivery_latitude'))
+        delivery_lon = float(request.form.get('delivery_longitude'))
+
         # Generate unique order number
         order_number = f"ORD-{datetime.utcnow().strftime('%Y%m%d')}-{secrets.token_hex(4).upper()}"
 
@@ -529,11 +540,16 @@ def restaurant_create_order():
             customer_name=customer_name,
             customer_phone=customer_phone,
             delivery_address=delivery_address,
-            pickup_address=request.form.get('pickup_address', current_user.current_location or ''),
+            pickup_address=pickup_address,
             items_description=request.form.get('items_description'),
             special_instructions=request.form.get('special_instructions'),
             order_value=float(request.form.get('order_value') or 0),
-            status='pending'
+            status='pending',
+            # GPS coordinates from map (always provided)
+            pickup_latitude=pickup_lat,
+            pickup_longitude=pickup_lon,
+            delivery_latitude=delivery_lat,
+            delivery_longitude=delivery_lon
         )
 
         db.session.add(order)
@@ -556,7 +572,15 @@ def restaurant_create_order():
         success, message, courier = default_assignment_service.auto_assign_order(order)
 
         if success:
-            flash(f'Order {order.order_number} created and assigned to {courier.full_name}!', 'success')
+            # Build detailed success message with estimated times
+            msg = f'Order {order.order_number} created and assigned to {courier.full_name}!'
+
+            if order.estimated_total_time:
+                msg += f' Estimated delivery: {order.estimated_total_time} minutes'
+                if order.estimated_pickup_time:
+                    msg += f' (pickup in ~{order.estimated_pickup_time} min, delivery in ~{order.estimated_delivery_time} min)'
+
+            flash(msg, 'success')
         else:
             flash(f'Order {order.order_number} created. {message}', 'warning')
 
@@ -828,6 +852,92 @@ def courier_toggle_availability():
     return redirect(url_for('courier_dashboard'))
 
 
+@app.route('/courier/update-location', methods=['GET', 'POST'])
+@role_required('courier')
+def courier_update_location():
+    """Update courier's current location"""
+    if request.method == 'POST':
+        latitude = float(request.form.get('latitude'))
+        longitude = float(request.form.get('longitude'))
+
+        # Update courier's location
+        current_user.last_known_latitude = latitude
+        current_user.last_known_longitude = longitude
+        db.session.commit()
+
+        flash('Your location has been updated successfully!', 'success')
+        return redirect(url_for('courier_dashboard'))
+
+    return render_template('courier/update_location.html')
+
+
+@app.route('/courier/order/<int:order_id>/reject', methods=['POST'])
+@role_required('courier')
+def courier_reject_order(order_id):
+    """Courier rejects an assigned order"""
+    order = Order.query.get_or_404(order_id)
+
+    # Verify order is assigned to this courier
+    if order.courier_id != current_user.id:
+        flash('You can only reject orders assigned to you.', 'error')
+        return redirect(url_for('courier_dashboard'))
+
+    # Only allow rejection if order hasn't been picked up yet
+    if order.status not in ['assigned']:
+        flash('You can only reject orders that haven\'t been picked up yet.', 'error')
+        return redirect(url_for('courier_view_order', order_id=order.id))
+
+    # Update rejection statistics
+    current_user.rejected_orders = (current_user.rejected_orders or 0) + 1
+    current_user.total_deliveries = (current_user.total_deliveries or 0) + 1
+
+    # Track rejection with timestamp for timeout-based reassignment
+    if not order.rejected_by_couriers:
+        order.rejected_by_couriers = []
+
+    order.rejected_by_couriers.append({
+        'courier_id': current_user.id,
+        'rejected_at': datetime.utcnow().isoformat()
+    })
+
+    # Log the rejection
+    log_entry = DeliveryLog(
+        order_id=order.id,
+        event_type='order_rejected',
+        event_description=f'Order rejected by {current_user.full_name}',
+        old_status='assigned',
+        new_status='pending',
+        user_id=current_user.id,
+        user_role='courier',
+        timestamp=datetime.utcnow()
+    )
+    db.session.add(log_entry)
+
+    # Reset order to pending
+    old_courier = order.courier_id
+    order.courier_id = None
+    order.status = 'pending'
+    order.assigned_at = None
+    order.estimated_pickup_time = None
+    order.estimated_delivery_time = None
+    order.estimated_total_time = None
+
+    db.session.commit()
+
+    flash('Order rejected. It will be reassigned to another courier.', 'info')
+
+    # Try to auto-reassign to another courier (excluding the one who just rejected)
+    from services.assignment_algorithm import default_assignment_service
+    success, message, new_courier = default_assignment_service.auto_assign_order(order, exclude_courier_id=old_courier)
+
+    if success:
+        flash(f'Order automatically reassigned to {new_courier.full_name}.', 'success')
+    else:
+        flash(f'Warning: {message}', 'warning')
+
+    return redirect(url_for('courier_dashboard'))
+
+
 @app.route('/courier/order/<int:order_id>/update', methods=['POST'])
 @role_required('courier')
 def courier_update_order_status(order_id):
@@ -897,6 +1007,15 @@ def courier_update_order_status(order_id):
         order.in_transit_at = datetime.utcnow()
     elif new_status == 'delivered' and not order.delivered_at:
         order.delivered_at = datetime.utcnow()
+
+        # Update courier performance stats
+        current_user.successful_deliveries = (current_user.successful_deliveries or 0) + 1
+        current_user.total_deliveries = (current_user.total_deliveries or 0) + 1
+
+        # Update courier location to delivery address (where they just delivered)
+        if order.delivery_latitude and order.delivery_longitude:
+            current_user.last_known_latitude = order.delivery_latitude
+            current_user.last_known_longitude = order.delivery_longitude
 
         # Check if courier has pending_unavailable flag
         if current_user.pending_unavailable:
@@ -1331,32 +1450,40 @@ def seed_db():
         )
         admin.set_password('admin123')
 
-        # Create restaurant users
+        # Create restaurant users (Ostrava locations with GPS)
         restaurant1 = User(
             username='pizza_palace',
             email='contact@pizzapalace.com',
-            full_name='Pizza Palace',
+            full_name='Pizza Palace Ostrava',
             role='restaurant',
-            current_location='123 Main St, Downtown'
+            current_location='Nádražní 164/215, 702 00 Moravská Ostrava, Czechia',
+            last_known_latitude=49.8348,  # Ostrava Main Station area
+            last_known_longitude=18.2820
         )
         restaurant1.set_password('rest123')
 
         restaurant2 = User(
             username='burger_king',
             email='info@burgerking.com',
-            full_name='Burger Kingdom',
+            full_name='Burger Kingdom Stodolní',
             role='restaurant',
-            current_location='456 Oak Ave, Midtown'
+            current_location='Stodolní 3, 702 00 Ostrava-Moravská Ostrava, Czechia',
+            last_known_latitude=49.8385,  # Stodolní street
+            last_known_longitude=18.2875
         )
         restaurant2.set_password('rest123')
 
-        # Create courier users
+        # Create courier users with Ostrava GPS locations
         courier1 = User(
             username='john_courier',
             email='john@courier.com',
             full_name='John Doe',
             role='courier',
-            is_available=True
+            is_available=True,
+            last_known_latitude=49.8209,  # Ostrava city center
+            last_known_longitude=18.2625,
+            total_deliveries=0,
+            successful_deliveries=0
         )
         courier1.set_password('courier123')
 
@@ -1365,7 +1492,11 @@ def seed_db():
             email='jane@courier.com',
             full_name='Jane Smith',
             role='courier',
-            is_available=True
+            is_available=True,
+            last_known_latitude=49.8350,  # Ostrava north
+            last_known_longitude=18.2820,
+            total_deliveries=0,
+            successful_deliveries=0
         )
         courier2.set_password('courier123')
 
@@ -1374,7 +1505,11 @@ def seed_db():
             email='mike@courier.com',
             full_name='Mike Johnson',
             role='courier',
-            is_available=False
+            is_available=False,
+            last_known_latitude=49.8050,  # Ostrava south
+            last_known_longitude=18.2500,
+            total_deliveries=0,
+            successful_deliveries=0
         )
         courier3.set_password('courier123')
 

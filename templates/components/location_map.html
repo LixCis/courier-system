@@ -1,0 +1,145 @@
+<!--
+    Location Map Component
+    Interactive map for selecting pickup/delivery locations
+    Uses OpenStreetMap + Leaflet.js (free, no API key required)
+-->
+
+<!-- Leaflet CSS -->
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+
+<!-- Map container -->
+<div id="{{ map_id }}" style="height: {{ height|default('400px') }}; width: 100%; border-radius: 8px; margin: 10px 0;"></div>
+
+<!-- Search box for address lookup -->
+<div style="margin-bottom: 12px;">
+    <div style="position: relative; max-width: 100%;">
+        <svg style="position: absolute; left: 12px; top: 50%; transform: translateY(-50%); width: 20px; height: 20px; color: #6b7280;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
+        </svg>
+        <input type="text"
+               id="{{ map_id }}_search"
+               placeholder="Search address in Ostrava (e.g., Stodolní, Poruba)..."
+               style="width: 100%; padding: 10px 12px 10px 40px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 14px; transition: all 0.2s;"
+               onfocus="this.style.borderColor='#3b82f6'; this.style.outline='none'; this.style.boxShadow='0 0 0 3px rgba(59, 130, 246, 0.1)'"
+               onblur="this.style.borderColor='#d1d5db'; this.style.boxShadow='none'">
+    </div>
+    <p style="margin: 6px 0 0 0; font-size: 12px; color: #6b7280;">
+        <svg style="display: inline-block; width: 14px; height: 14px; margin-right: 4px; vertical-align: middle;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+        </svg>
+        Type to search or click directly on the map
+    </p>
+</div>
+
+<!-- Display selected address -->
+<div id="{{ map_id }}_address_display" style="margin: 10px 0; padding: 10px; background-color: #f0f9ff; border-radius: 4px; display: none;">
+    <strong>Selected:</strong> <span id="{{ map_id }}_address_text"></span>
+</div>
+
+<!-- Hidden fields to store coordinates and address -->
+<input type="hidden" id="{{ map_id }}_lat" name="{{ lat_field }}" value="{{ initial_lat }}" required>
+<input type="hidden" id="{{ map_id }}_lon" name="{{ lon_field }}" value="{{ initial_lon }}" required>
+<input type="hidden" id="{{ map_id }}_address" name="{{ address_field }}" value="{{ initial_address }}">
+
+<!-- Leaflet JS -->
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+<script>
+(function() {
+    // Default center: Ostrava city center
+    const defaultLat = {{ initial_lat|default('49.8209') }};
+    const defaultLon = {{ initial_lon|default('18.2625') }};
+
+    // Initialize map centered on Ostrava
+    const map = L.map('{{ map_id }}').setView([defaultLat, defaultLon], {{ zoom|default('13') }});
+
+    // Add OpenStreetMap tiles
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '© OpenStreetMap contributors',
+        maxZoom: 19
+    }).addTo(map);
+
+    // Marker for selected location
+    let marker = null;
+
+    // If initial coordinates provided, add marker
+    if ({{ initial_lat|default('null') }} && {{ initial_lon|default('null') }}) {
+        marker = L.marker([defaultLat, defaultLon]).addTo(map);
+        marker.bindPopup('{{ marker_label|default("Selected location") }}').openPopup();
+    }
+
+    // Helper function to update location
+    function updateLocation(lat, lon, addressText) {
+        // Update hidden fields
+        document.getElementById('{{ map_id }}_lat').value = lat.toFixed(6);
+        document.getElementById('{{ map_id }}_lon').value = lon.toFixed(6);
+        document.getElementById('{{ map_id }}_address').value = addressText || `${lat.toFixed(4)}, ${lon.toFixed(4)}`;
+
+        // Update or create marker
+        if (marker) {
+            marker.setLatLng([lat, lon]);
+        } else {
+            marker = L.marker([lat, lon]).addTo(map);
+        }
+
+        marker.bindPopup(`{{ marker_label|default("Selected location") }}<br>${addressText || `Lat: ${lat.toFixed(4)}, Lon: ${lon.toFixed(4)}`}`).openPopup();
+
+        // Show address display
+        document.getElementById('{{ map_id }}_address_display').style.display = 'block';
+        document.getElementById('{{ map_id }}_address_text').textContent = addressText || `Coordinates: ${lat.toFixed(4)}, ${lon.toFixed(4)}`;
+
+        // Trigger change event for form validation
+        document.getElementById('{{ map_id }}_lat').dispatchEvent(new Event('change'));
+    }
+
+    // Click handler - set location
+    map.on('click', function(e) {
+        const lat = e.latlng.lat;
+        const lon = e.latlng.lng;
+
+        // Reverse geocode to get address
+        fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}`)
+            .then(response => response.json())
+            .then(data => {
+                updateLocation(lat, lon, data.display_name);
+            })
+            .catch(error => {
+                console.error('Reverse geocoding failed:', error);
+                updateLocation(lat, lon, null);
+            });
+    });
+
+    // Search functionality (using Nominatim)
+    const searchInput = document.getElementById('{{ map_id }}_search');
+    let searchTimeout;
+
+    searchInput.addEventListener('input', function(e) {
+        clearTimeout(searchTimeout);
+        const query = e.target.value;
+
+        if (query.length < 3) return;
+
+        searchTimeout = setTimeout(function() {
+            // Add "Ostrava" to search query for better results
+            const fullQuery = query.includes('Ostrava') ? query : query + ', Ostrava, Czech Republic';
+
+            fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(fullQuery)}&limit=1`)
+                .then(response => response.json())
+                .then(data => {
+                    if (data.length > 0) {
+                        const result = data[0];
+                        const lat = parseFloat(result.lat);
+                        const lon = parseFloat(result.lon);
+
+                        // Update map view
+                        map.setView([lat, lon], 16);
+
+                        // Update location
+                        updateLocation(lat, lon, result.display_name);
+                    }
+                })
+                .catch(error => console.error('Search error:', error));
+        }, 500); // Debounce search
+    });
+})();
+</script>

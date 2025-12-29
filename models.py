@@ -23,6 +23,13 @@ class User(UserMixin, db.Model):
     pending_unavailable = db.Column(db.Boolean, default=False)  # Courier wants to go unavailable after completing orders
     current_location = db.Column(db.String(200))  # For future GPS integration
 
+    # Basic courier tracking
+    total_deliveries = db.Column(db.Integer, default=0)
+    successful_deliveries = db.Column(db.Integer, default=0)
+    rejected_orders = db.Column(db.Integer, default=0)  # Orders courier rejected
+    last_known_latitude = db.Column(db.Float)
+    last_known_longitude = db.Column(db.Float)
+
     # Relationships
     created_orders = db.relationship('Order', backref='restaurant_user', lazy=True, foreign_keys='Order.restaurant_id')
     assigned_orders = db.relationship('Order', backref='courier_user', lazy=True, foreign_keys='Order.courier_id')
@@ -70,12 +77,26 @@ class Order(db.Model):
     delivery_proof_photo = db.Column(db.String(255))  # Path to uploaded photo
     delivery_proof_analysis = db.Column(db.JSON)  # Image analysis results (GPS, quality, privacy)
 
+    # Rejection tracking (for timeout-based reassignment)
+    rejected_by_couriers = db.Column(db.JSON)  # [{courier_id: X, rejected_at: timestamp}, ...]
+
+    # Geocoding cache
+    pickup_latitude = db.Column(db.Float)
+    pickup_longitude = db.Column(db.Float)
+    delivery_latitude = db.Column(db.Float)
+    delivery_longitude = db.Column(db.Float)
+
     # Timestamps (critical for AI analysis)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
     assigned_at = db.Column(db.DateTime)
     picked_up_at = db.Column(db.DateTime)
     in_transit_at = db.Column(db.DateTime)
     delivered_at = db.Column(db.DateTime)
+
+    # Estimated times (in minutes)
+    estimated_pickup_time = db.Column(db.Integer)  # Minutes for courier to reach restaurant
+    estimated_delivery_time = db.Column(db.Integer)  # Minutes from restaurant to customer
+    estimated_total_time = db.Column(db.Integer)  # Total minutes (pickup + delivery)
 
     # Relationships
     delivery_logs = db.relationship('DeliveryLog', backref='order', lazy=True, cascade='all, delete-orphan')

@@ -63,16 +63,33 @@
                     <!-- Delivery Information -->
                     <div>
                         <h3 class="text-lg font-medium leading-6 text-gray-900">Delivery Information</h3>
-                        <div class="mt-4 space-y-4">
+                        <div class="mt-4 space-y-6">
+                            <!-- Pickup Location (Restaurant - Fixed) -->
                             <div>
-                                <label for="pickup_address" class="block text-sm font-medium text-gray-700">Pickup Address (Your Restaurant)</label>
-                                <textarea name="pickup_address" id="pickup_address" rows="2" required
-                                          class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-green-500 focus:ring-green-500 sm:text-sm px-3 py-2 border">{{ current_user.current_location or '' }}</textarea>
+                                <label class="block text-sm font-medium text-gray-700 mb-2">Pickup Location (Your Restaurant)</label>
+                                <div class="p-3 bg-green-50 border border-green-200 rounded-md">
+                                    <p class="text-sm text-green-800">
+                                        <strong>{{ current_user.full_name }}</strong><br>
+                                        {{ current_user.current_location }}
+                                    </p>
+                                </div>
+                                <!-- Hidden fields for pickup location (from restaurant profile) -->
+                                <input type="hidden" name="pickup_latitude" value="{{ current_user.last_known_latitude }}">
+                                <input type="hidden" name="pickup_longitude" value="{{ current_user.last_known_longitude }}">
+                                <input type="hidden" name="pickup_address" value="{{ current_user.current_location }}">
                             </div>
+
+                            <!-- Delivery Location Map -->
                             <div>
-                                <label for="delivery_address" class="block text-sm font-medium text-gray-700">Delivery Address</label>
-                                <textarea name="delivery_address" id="delivery_address" rows="2" required
-                                          class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-green-500 focus:ring-green-500 sm:text-sm px-3 py-2 border"></textarea>
+                                <label class="block text-sm font-medium text-gray-700 mb-2">Delivery Location (Customer Address)</label>
+                                <p class="text-sm text-gray-500 mb-2">Search or click on map to set customer delivery location</p>
+                                {% set map_id = 'delivery_map' %}
+                                {% set lat_field = 'delivery_latitude' %}
+                                {% set lon_field = 'delivery_longitude' %}
+                                {% set address_field = 'delivery_address' %}
+                                {% set marker_label = 'Customer Delivery' %}
+                                {% set height = '400px' %}
+                                {% include 'components/location_map.html' %}
                             </div>
                         </div>
                     </div>
