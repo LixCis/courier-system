@@ -167,7 +167,7 @@ function filterCustomers() {
     }
 }
 
-// Validate delivery location before submit
+// Validate delivery location before submit and add small delay for UX
 document.getElementById('order-form').addEventListener('submit', function(e) {
     const deliveryLat = document.querySelector('input[name="delivery_latitude"]').value;
     const deliveryLon = document.querySelector('input[name="delivery_longitude"]').value;
@@ -180,6 +180,20 @@ document.getElementById('order-form').addEventListener('submit', function(e) {
         document.getElementById('delivery_map').scrollIntoView({ behavior: 'smooth', block: 'center' });
         return false;
     }
+
+    // Add small delay before submit (better UX - gives impression of processing)
+    e.preventDefault();
+    const submitBtn = this.querySelector('button[type="submit"]');
+    const originalText = submitBtn.textContent;
+
+    submitBtn.disabled = true;
+    submitBtn.textContent = 'Creating Order...';
+    submitBtn.classList.add('opacity-75');
+
+    // Submit after 400ms delay
+    setTimeout(() => {
+        this.submit();
+    }, 400);
 });
 </script>
 {% endblock %}

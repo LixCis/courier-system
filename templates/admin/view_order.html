@@ -24,9 +24,8 @@
             'special_instructions'
         ]) }}
 
-        {# AI Enhanced Description (if available) #}
-        {% if order.ai_enhanced_description %}
-        <div class="bg-white shadow sm:rounded-lg mt-6">
+        {# AI Enhanced Description (with loading state) #}
+        <div class="bg-white shadow sm:rounded-lg mt-6" id="ai-description-section">
             <div class="px-4 py-5 sm:p-6">
                 <h3 class="text-base font-semibold leading-6 text-gray-900 mb-4">
                     AI Standardizovaný popis
@@ -34,15 +33,31 @@
                         AI Enhanced
                     </span>
                 </h3>
-                <div class="bg-blue-50 rounded-lg border border-blue-200 p-4">
-                    <p class="text-sm text-gray-900 whitespace-pre-wrap">{{ order.ai_enhanced_description }}</p>
+
+                {# Loading state (shown when AI is processing) #}
+                <div id="ai-loading" class="{% if order.ai_enhanced_description %}hidden{% endif %}">
+                    <div class="bg-gray-50 rounded-lg border border-gray-200 p-4">
+                        <div class="flex items-center space-x-3">
+                            <svg class="animate-spin h-5 w-5 text-blue-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                            </svg>
+                            <span class="text-sm text-gray-600">AI standardizuje popis objednávky...</span>
+                        </div>
+                    </div>
                 </div>
-                <p class="mt-2 text-xs text-gray-500">
-                    Tento popis byl automaticky vylepšen pomocí AI pro standardizaci formátu.
-                </p>
+
+                {# AI description (shown when ready) #}
+                <div id="ai-description" class="{% if not order.ai_enhanced_description %}hidden{% endif %}">
+                    <div class="bg-blue-50 rounded-lg border border-blue-200 p-4">
+                        <p class="text-sm text-gray-900 whitespace-pre-wrap">{{ order.ai_enhanced_description or '' }}</p>
+                    </div>
+                    <p class="mt-2 text-xs text-gray-500">
+                        Tento popis byl automaticky vylepšen pomocí AI pro standardizaci formátu.
+                    </p>
+                </div>
             </div>
         </div>
-        {% endif %}
 
         {# Display Delivery Proof if exists #}
         {% if order.delivery_proof_photo %}
@@ -66,4 +81,35 @@
     {{ order_components.delivery_timeline(logs, 'indigo') }}
     </div>
 </div>
+
+<script>
+// Poll for AI description if not yet available
+(function pollAIDescription() {
+    const aiLoading = document.getElementById('ai-loading');
+    const aiDescription = document.getElementById('ai-description');
+    const aiDescriptionText = aiDescription.querySelector('p');
+
+    // Only poll if AI description is not ready yet
+    if (!aiLoading.classList.contains('hidden')) {
+        fetch('{{ url_for("api_get_ai_description", order_id=order.id) }}')
+            .then(response => response.json())
+            .then(data => {
+                if (data.is_ready && data.ai_enhanced_description) {
+                    // AI description is ready - update UI
+                    aiDescriptionText.textContent = data.ai_enhanced_description;
+                    aiLoading.classList.add('hidden');
+                    aiDescription.classList.remove('hidden');
+                } else {
+                    // Not ready yet - poll again after 2 seconds
+                    setTimeout(pollAIDescription, 2000);
+                }
+            })
+            .catch(error => {
+                console.error('Error polling AI description:', error);
+                // Retry after 3 seconds on error
+                setTimeout(pollAIDescription, 3000);
+            });
+    }
+})();
+</script>
 {% endblock %}

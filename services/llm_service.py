@@ -103,24 +103,33 @@ class LLMService:
             return None
 
         try:
-            # Craft prompt in Czech for Czech model
-            prompt = f"""Úkol: Přepiš následující popis jídla do standardizovaného, profesionálního formátu.
-Zachovej všechny důležité informace (názvy pokrmů, množství, příloh, poznámky).
-Oprav gramatické chyby a používej konzistentní formátování.
-Odpověz POUZE vylepšeným popisem, bez dalšího textu.
+            # Craft prompt with examples for better results
+            prompt = f"""Úkol: Standardizuj popis jídla. Zachovej všechny informace a používej správnou češtinu.
 
-Původní popis:
+Příklady:
+
+Původní: Dvě pizzy margherita, jedna bez sýra, přidat bazalku
+Standardizovaný: 2x pizza Margherita (1x bez sýra, přidat bazalku)
+
+Původní: tři velký cola a hranolky velký dvakrát
+Standardizovaný: 3x velká Coca-Cola, 2x velké hranolky
+
+Původní: burger s slaninou extra sýr prosim a bez okurek
+Standardizovaný: 1x burger se slaninou (extra sýr, bez okurek)
+
+Nyní standardizuj tento popis:
 {raw_description}
 
 Standardizovaný popis:"""
 
-            # Generate response
+            # Generate response with strict parameters
             output = self.llm(
                 prompt,
-                max_tokens=2048,  # Maximum length of response
-                temperature=0.2,  # Lower = more focused, higher = more creative
-                top_p=0.9,
-                stop=["Původní popis:", "\n\n\n"],  # Stop generation at these tokens
+                max_tokens=256,  # Shorter max length for concise output
+                temperature=0.1,  # Very low = more deterministic
+                top_p=0.85,  # Slightly lower for more focused output
+                repeat_penalty=1.1,  # Penalize repetition
+                stop=["Původní:", "Nyní standardizuj", "\n\n"],  # Stop tokens
                 echo=False  # Don't include prompt in output
             )
 

@@ -609,11 +609,10 @@ def restaurant_create_order():
         # Generate unique order number
         order_number = f"ORD-{datetime.utcnow().strftime('%Y%m%d')}-{secrets.token_hex(4).upper()}"
 
-        # Get items description and enhance with AI
+        # Get items description (AI enhancement will happen in background)
         items_description = request.form.get('items_description')
-        ai_enhanced = enhance_order_description(items_description)
 
-        # Create new order
+        # Create new order (without AI description for now)
         order = Order(
             order_number=order_number,
             restaurant_id=current_user.id,
@@ -623,7 +622,7 @@ def restaurant_create_order():
             delivery_address=delivery_address,
             pickup_address=pickup_address,
             items_description=items_description,
-            ai_enhanced_description=ai_enhanced,  # AI-standardized version
+            ai_enhanced_description=None,  # Will be filled in by background task
             special_instructions=request.form.get('special_instructions'),
             order_value=float(request.form.get('order_value') or 0),
             status='pending',
@@ -649,6 +648,32 @@ def restaurant_create_order():
         )
         db.session.add(log_entry)
         db.session.commit()
+
+        # Start AI description enhancement in background (non-blocking)
+        import threading
+        def enhance_in_background(order_id, description):
+            """Background task to enhance order description with AI"""
+            with app.app_context():
+                try:
+                    ai_enhanced = enhance_order_description(description)
+                    if ai_enhanced:
+                        # Update order with AI description
+                        order_to_update = Order.query.get(order_id)
+                        if order_to_update:
+                            order_to_update.ai_enhanced_description = ai_enhanced
+                            db.session.commit()
+                            print(f"AI description updated for order {order_to_update.order_number}")
+                except Exception as e:
+                    print(f"Error enhancing order description in background: {e}")
+
+        # Launch background thread
+        if items_description and items_description.strip():
+            bg_thread = threading.Thread(
+                target=enhance_in_background,
+                args=(order.id, items_description),
+                daemon=True
+            )
+            bg_thread.start()
 
         # Auto-assign to courier
         success, message, courier = default_assignment_service.auto_assign_order(order)
@@ -1518,6 +1543,27 @@ def api_courier_order_detail(order_id):
             'new_status': log.new_status,
             'timestamp': log.timestamp.isoformat()
         } for log in logs]
+    })
+
+
+@app.route('/api/order/<int:order_id>/ai-description')
+@login_required
+def api_get_ai_description(order_id):
+    """API endpoint to check if AI description is ready"""
+    order = Order.query.get_or_404(order_id)
+
+    # Check permissions
+    if current_user.role == 'restaurant' and order.restaurant_id != current_user.id:
+        from flask import jsonify
+        return jsonify({'error': 'Unauthorized'}), 403
+    elif current_user.role == 'courier' and order.courier_id != current_user.id:
+        from flask import jsonify
+        return jsonify({'error': 'Unauthorized'}), 403
+
+    from flask import jsonify
+    return jsonify({
+        'ai_enhanced_description': order.ai_enhanced_description,
+        'is_ready': order.ai_enhanced_description is not None
     })
 
 
