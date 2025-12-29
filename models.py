@@ -66,6 +66,7 @@ class Order(db.Model):
 
     # Order details
     items_description = db.Column(db.Text)
+    ai_enhanced_description = db.Column(db.Text)  # AI-standardized version of items_description
     special_instructions = db.Column(db.Text)
     order_value = db.Column(db.Float, default=0.0)
 

@@ -12,3 +12,6 @@ geopy==2.4.1
 
 # Background Scheduler for pending orders
 APScheduler==3.10.4
+
+# Local LLM for order description standardization
+llama-cpp-python==0.2.90

@@ -41,6 +41,26 @@
             'special_instructions'
         ]) }}
 
+        {# AI Enhanced Description (if available) #}
+        {% if order.ai_enhanced_description %}
+        <div class="bg-white shadow sm:rounded-lg mt-6">
+            <div class="px-4 py-5 sm:p-6">
+                <h3 class="text-base font-semibold leading-6 text-gray-900 mb-4">
+                    AI Standardizovaný popis
+                    <span class="ml-2 inline-flex items-center rounded-md bg-blue-50 px-2 py-1 text-xs font-medium text-blue-700 ring-1 ring-inset ring-blue-700/10">
+                        AI Enhanced
+                    </span>
+                </h3>
+                <div class="bg-blue-50 rounded-lg border border-blue-200 p-4">
+                    <p class="text-sm text-gray-900 whitespace-pre-wrap">{{ order.ai_enhanced_description }}</p>
+                </div>
+                <p class="mt-2 text-xs text-gray-500">
+                    Tento popis byl automaticky vylepšen pomocí AI pro standardizaci formátu.
+                </p>
+            </div>
+        </div>
+        {% endif %}
+
         {# Delivery Metrics #}
         {{ order_components.delivery_metrics(order) }}
         </div>

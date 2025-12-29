@@ -7,6 +7,7 @@ from datetime import datetime
 import secrets
 import os
 from werkzeug.utils import secure_filename
+from services.llm_service import enhance_order_description
 
 app = Flask(__name__)
 app.config.from_object(Config)
@@ -608,6 +609,10 @@ def restaurant_create_order():
         # Generate unique order number
         order_number = f"ORD-{datetime.utcnow().strftime('%Y%m%d')}-{secrets.token_hex(4).upper()}"
 
+        # Get items description and enhance with AI
+        items_description = request.form.get('items_description')
+        ai_enhanced = enhance_order_description(items_description)
+
         # Create new order
         order = Order(
             order_number=order_number,
@@ -617,7 +622,8 @@ def restaurant_create_order():
             customer_phone=customer_phone,
             delivery_address=delivery_address,
             pickup_address=pickup_address,
-            items_description=request.form.get('items_description'),
+            items_description=items_description,
+            ai_enhanced_description=ai_enhanced,  # AI-standardized version
             special_instructions=request.form.get('special_instructions'),
             order_value=float(request.form.get('order_value') or 0),
             status='pending',
