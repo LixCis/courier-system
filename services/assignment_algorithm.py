@@ -353,7 +353,7 @@ class AssignmentService:
                 order.pickup_longitude,
                 order.delivery_latitude,
                 order.delivery_longitude,
-                vehicle_type='bike'  # TODO: get from courier profile
+                vehicle_type=courier.vehicle_type or 'bike'
             )
 
             if estimates:

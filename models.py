@@ -22,6 +22,7 @@ class User(UserMixin, db.Model):
     is_available = db.Column(db.Boolean, default=True)  # For couriers only
     pending_unavailable = db.Column(db.Boolean, default=False)  # Courier wants to go unavailable after completing orders
     current_location = db.Column(db.String(200))  # For future GPS integration
+    vehicle_type = db.Column(db.String(20), default='bike')  # bike, scooter, motorcycle, car, van
 
     # Basic courier tracking
     total_deliveries = db.Column(db.Integer, default=0)

@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+
+{% block title %}Restaurant Profile{% endblock %}
+
+{% block content %}
+<div class="py-6">
+    <div class="mx-auto max-w-3xl px-4 sm:px-6 lg:px-8">
+        <h1 class="text-2xl font-semibold text-gray-900">Restaurant Profile</h1>
+
+        <form id="profile-form" action="{{ url_for('restaurant_profile') }}" method="POST" class="mt-6">
+            <div class="bg-white shadow sm:rounded-lg">
+                <div class="px-4 py-5 sm:p-6 space-y-6">
+                    <!-- Basic Information -->
+                    <div>
+                        <h3 class="text-lg font-medium leading-6 text-gray-900">Basic Information</h3>
+                        <div class="mt-4 space-y-4">
+                            <div>
+                                <label for="full_name" class="block text-sm font-medium text-gray-700">Restaurant Name *</label>
+                                <input type="text" name="full_name" id="full_name" required
+                                       value="{{ current_user.full_name }}"
+                                       class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-green-500 focus:ring-green-500 sm:text-sm px-3 py-2 border">
+                            </div>
+
+                            <div>
+                                <label for="email" class="block text-sm font-medium text-gray-700">Email *</label>
+                                <input type="email" name="email" id="email" required
+                                       value="{{ current_user.email }}"
+                                       class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-green-500 focus:ring-green-500 sm:text-sm px-3 py-2 border">
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Pickup Location -->
+                    <div>
+                        <h3 class="text-lg font-medium leading-6 text-gray-900 mb-2">Pickup Location</h3>
+                        <p class="text-sm text-gray-500 mb-4">
+                            This is where couriers will pick up orders. Click on the map to set your restaurant's location.
+                        </p>
+
+                        {% set map_id = 'pickup_map' %}
+                        {% set lat_field = 'pickup_latitude' %}
+                        {% set lon_field = 'pickup_longitude' %}
+                        {% set address_field = 'current_location' %}
+                        {% set marker_label = 'Restaurant Pickup' %}
+                        {% set height = '400px' %}
+                        {% set initial_lat = current_user.last_known_latitude or 49.8348 %}
+                        {% set initial_lon = current_user.last_known_longitude or 18.2820 %}
+                        {% set initial_address = current_user.current_location or '' %}
+                        {% include 'components/location_map.html' %}
+                    </div>
+                </div>
+
+                <div class="bg-gray-50 px-4 py-3 sm:px-6 sm:flex sm:flex-row-reverse">
+                    <button type="submit"
+                            class="inline-flex w-full justify-center rounded-md border border-transparent bg-green-600 px-4 py-2 text-base font-medium text-white shadow-sm hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2 sm:ml-3 sm:w-auto sm:text-sm">
+                        Save Changes
+                    </button>
+                    <a href="{{ url_for('restaurant_dashboard') }}"
+                       class="mt-3 inline-flex w-full justify-center rounded-md border border-gray-300 bg-white px-4 py-2 text-base font-medium text-gray-700 shadow-sm hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2 sm:mt-0 sm:w-auto sm:text-sm">
+                        Cancel
+                    </a>
+                </div>
+            </div>
+        </form>
+    </div>
+</div>
+
+<script>
+// Validate pickup location before submit
+document.getElementById('profile-form').addEventListener('submit', function(e) {
+    const pickupLat = document.querySelector('input[name="pickup_latitude"]').value;
+    const pickupLon = document.querySelector('input[name="pickup_longitude"]').value;
+
+    if (!pickupLat || !pickupLon) {
+        e.preventDefault();
+        alert('⚠️ Please select your restaurant pickup location on the map!\n\nThis is where couriers will pick up orders.');
+        document.getElementById('pickup_map').scrollIntoView({ behavior: 'smooth', block: 'center' });
+        return false;
+    }
+});
+</script>
+{% endblock %}

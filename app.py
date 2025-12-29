@@ -374,6 +374,15 @@ def admin_edit_user(user_id):
         return redirect(url_for('admin_users'))
 
     if request.method == 'POST':
+        # Handle reset statistics for courier
+        if 'reset_stats' in request.form and user.role == 'courier':
+            user.total_deliveries = 0
+            user.successful_deliveries = 0
+            user.rejected_orders = 0
+            db.session.commit()
+            flash(f'Statistics reset for {user.full_name}!', 'success')
+            return redirect(url_for('admin_edit_user', user_id=user.id))
+
         # Check if username is taken by another user
         username = request.form.get('username')
         if username != user.username and User.query.filter_by(username=username).first():
@@ -393,9 +402,23 @@ def admin_edit_user(user_id):
         user.role = request.form.get('role')
         user.is_active = request.form.get('is_active') == 'on'
 
-        # Update location for restaurants
+        # Update location for restaurants (with GPS)
         if user.role == 'restaurant':
             user.current_location = request.form.get('current_location', '')
+            pickup_lat_str = request.form.get('pickup_latitude')
+            pickup_lon_str = request.form.get('pickup_longitude')
+
+            if pickup_lat_str and pickup_lon_str:
+                try:
+                    user.last_known_latitude = float(pickup_lat_str)
+                    user.last_known_longitude = float(pickup_lon_str)
+                except ValueError:
+                    flash('Invalid GPS coordinates.', 'error')
+                    return render_template('admin/edit_user.html', user=user)
+
+        # Update vehicle type for couriers
+        if user.role == 'courier':
+            user.vehicle_type = request.form.get('vehicle_type', 'bike')
 
         # Update password if provided
         new_password = request.form.get('password')
@@ -458,6 +481,38 @@ def admin_toggle_courier_availability(courier_id):
 
 
 # ==================== Restaurant Routes ====================
+
+@app.route('/restaurant/profile', methods=['GET', 'POST'])
+@role_required('restaurant')
+def restaurant_profile():
+    """Restaurant profile edit page"""
+    if request.method == 'POST':
+        # Update basic info
+        current_user.full_name = request.form.get('full_name')
+        current_user.email = request.form.get('email')
+        current_user.current_location = request.form.get('current_location')
+
+        # Update pickup location (GPS)
+        pickup_lat_str = request.form.get('pickup_latitude')
+        pickup_lon_str = request.form.get('pickup_longitude')
+
+        if pickup_lat_str and pickup_lon_str:
+            try:
+                current_user.last_known_latitude = float(pickup_lat_str)
+                current_user.last_known_longitude = float(pickup_lon_str)
+            except ValueError:
+                flash('Invalid GPS coordinates.', 'error')
+                return render_template('restaurant/profile.html')
+        else:
+            flash('⚠️ Please select your restaurant pickup location on the map!', 'error')
+            return render_template('restaurant/profile.html')
+
+        db.session.commit()
+        flash('Profile updated successfully!', 'success')
+        return redirect(url_for('restaurant_dashboard'))
+
+    return render_template('restaurant/profile.html')
+
 
 @app.route('/restaurant/dashboard')
 @role_required('restaurant')
@@ -890,6 +945,23 @@ def courier_update_location():
         return redirect(url_for('courier_dashboard'))
 
     return render_template('courier/update_location.html')
+
+
+@app.route('/courier/profile', methods=['GET', 'POST'])
+@role_required('courier')
+def courier_profile():
+    """Courier profile edit page"""
+    if request.method == 'POST':
+        # Update basic info
+        current_user.full_name = request.form.get('full_name')
+        current_user.email = request.form.get('email')
+        current_user.vehicle_type = request.form.get('vehicle_type')
+
+        db.session.commit()
+        flash('Profile updated successfully!', 'success')
+        return redirect(url_for('courier_dashboard'))
+
+    return render_template('courier/profile.html')
 
 
 @app.route('/courier/order/<int:order_id>/reject', methods=['POST'])
@@ -1501,6 +1573,7 @@ def seed_db():
             full_name='John Doe',
             role='courier',
             is_available=True,
+            vehicle_type='bike',  # Fastest for city center
             last_known_latitude=49.8209,  # Ostrava city center
             last_known_longitude=18.2625,
             total_deliveries=0,
@@ -1514,6 +1587,7 @@ def seed_db():
             full_name='Jane Smith',
             role='courier',
             is_available=True,
+            vehicle_type='scooter',  # Good balance
             last_known_latitude=49.8350,  # Ostrava north
             last_known_longitude=18.2820,
             total_deliveries=0,
@@ -1527,6 +1601,7 @@ def seed_db():
             full_name='Mike Johnson',
             role='courier',
             is_available=False,
+            vehicle_type='motorcycle',  # Fastest overall
             last_known_latitude=49.8050,  # Ostrava south
             last_known_longitude=18.2500,
             total_deliveries=0,
