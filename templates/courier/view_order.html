@@ -5,7 +5,7 @@
 
 {% block content %}
 <div class="py-6">
-    <div class="mx-auto max-w-5xl px-4 sm:px-6 lg:px-8">
+    <div class="mx-auto max-w-5xl px-4 sm:px-6 lg:px-8" id="order-content-wrapper">
 
         {# Order Header #}
         {% call order_components.order_header(order, url_for('courier_dashboard'), '← Back to Dashboard') %}
@@ -25,7 +25,7 @@
 
         {# Status Update Actions #}
         {% if order.status != 'delivered' %}
-        <div class="mt-6 border-t border-gray-200 pt-6">
+        <div class="mt-6 border-t border-gray-200 pt-6" data-order-actions>
             <h3 class="text-lg font-medium text-gray-900 mb-4">Update Delivery Status</h3>
 
             {% if order.status == 'assigned' %}

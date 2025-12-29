@@ -50,9 +50,9 @@
         <!-- Orders List -->
         <div class="mt-8">
             <div class="bg-white shadow overflow-hidden sm:rounded-md">
-                <ul role="list" class="divide-y divide-gray-200" id="active-orders-list" data-orders-list="active">
+                <ul role="list" class="divide-y divide-gray-200" id="orders-list" data-orders-list>
                     {% for order in orders %}
-                    <li>
+                    <li data-order-id="{{ order.id }}">
                         <a href="{{ url_for('restaurant_view_order', order_id=order.id) }}" class="block hover:bg-gray-50">
                             <div class="px-4 py-4 sm:px-6">
                                 <div class="flex items-center justify-between">
@@ -62,7 +62,7 @@
                                         <p class="text-xs text-gray-400 mt-1">{{ order.delivery_address }}</p>
                                     </div>
                                     <div class="ml-2 flex-shrink-0">
-                                        <span class="inline-flex rounded-full px-3 py-1 text-xs font-semibold leading-5
+                                        <span data-status="{{ order.status }}" class="inline-flex rounded-full px-3 py-1 text-xs font-semibold leading-5
                                             {% if order.status == 'delivered' %}bg-green-100 text-green-800
                                             {% elif order.status == 'pending' %}bg-yellow-100 text-yellow-800
                                             {% elif order.status in ['assigned', 'picked_up', 'in_transit'] %}bg-blue-100 text-blue-800
@@ -74,15 +74,17 @@
                                 <div class="mt-2 sm:flex sm:justify-between">
                                     <div class="sm:flex">
                                         <p class="flex items-center text-sm text-gray-500">
-                                            {% if order.courier_user %}
-                                                Courier: {{ order.courier_user.full_name }}
-                                            {% else %}
-                                                <span class="text-yellow-600">Waiting for courier assignment</span>
-                                            {% endif %}
+                                            <span data-courier>
+                                                {% if order.courier_user %}
+                                                    Courier: {{ order.courier_user.full_name }}
+                                                {% else %}
+                                                    <span class="text-yellow-600">Waiting for courier assignment</span>
+                                                {% endif %}
+                                            </span>
                                         </p>
                                     </div>
                                     <div class="mt-2 flex items-center text-sm text-gray-500 sm:mt-0">
-                                        <p>{{ order.created_at.strftime('%Y-%m-%d %H:%M') }}</p>
+                                        <p data-time>{{ order.created_at.strftime('%Y-%m-%d %H:%M') }}</p>
                                     </div>
                                 </div>
                             </div>

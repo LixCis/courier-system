@@ -524,10 +524,31 @@ def restaurant_create_order():
 
         # Get GPS coordinates from map (required)
         pickup_address = request.form.get('pickup_address')
-        pickup_lat = float(request.form.get('pickup_latitude'))
-        pickup_lon = float(request.form.get('pickup_longitude'))
-        delivery_lat = float(request.form.get('delivery_latitude'))
-        delivery_lon = float(request.form.get('delivery_longitude'))
+        pickup_lat_str = request.form.get('pickup_latitude')
+        pickup_lon_str = request.form.get('pickup_longitude')
+        delivery_lat_str = request.form.get('delivery_latitude')
+        delivery_lon_str = request.form.get('delivery_longitude')
+
+        # Validate GPS coordinates
+        if not delivery_lat_str or not delivery_lon_str:
+            flash('⚠️ Please select a delivery location on the map!', 'error')
+            saved_customers = SavedCustomer.query.filter_by(restaurant_id=current_user.id).order_by(SavedCustomer.last_used_at.desc()).all()
+            return render_template('restaurant/create_order.html', saved_customers=saved_customers)
+
+        if not pickup_lat_str or not pickup_lon_str:
+            flash('⚠️ Pickup location is missing. Please contact administrator.', 'error')
+            saved_customers = SavedCustomer.query.filter_by(restaurant_id=current_user.id).order_by(SavedCustomer.last_used_at.desc()).all()
+            return render_template('restaurant/create_order.html', saved_customers=saved_customers)
+
+        try:
+            pickup_lat = float(pickup_lat_str)
+            pickup_lon = float(pickup_lon_str)
+            delivery_lat = float(delivery_lat_str)
+            delivery_lon = float(delivery_lon_str)
+        except ValueError:
+            flash('⚠️ Invalid GPS coordinates. Please select locations on the map.', 'error')
+            saved_customers = SavedCustomer.query.filter_by(restaurant_id=current_user.id).order_by(SavedCustomer.last_used_at.desc()).all()
+            return render_template('restaurant/create_order.html', saved_customers=saved_customers)
 
         # Generate unique order number
         order_number = f"ORD-{datetime.utcnow().strftime('%Y%m%d')}-{secrets.token_hex(4).upper()}"

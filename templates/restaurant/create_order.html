@@ -7,7 +7,7 @@
     <div class="mx-auto max-w-3xl px-4 sm:px-6 lg:px-8">
         <h1 class="text-2xl font-semibold text-gray-900">Create New Order</h1>
 
-        <form action="{{ url_for('restaurant_create_order') }}" method="POST" class="mt-6 space-y-6">
+        <form id="order-form" action="{{ url_for('restaurant_create_order') }}" method="POST" class="mt-6 space-y-6">
             <div class="bg-white shadow sm:rounded-lg">
                 <div class="px-4 py-5 sm:p-6 space-y-6">
                     <!-- Saved Customers Quick Select -->
@@ -166,5 +166,20 @@ function filterCustomers() {
         }
     }
 }
+
+// Validate delivery location before submit
+document.getElementById('order-form').addEventListener('submit', function(e) {
+    const deliveryLat = document.querySelector('input[name="delivery_latitude"]').value;
+    const deliveryLon = document.querySelector('input[name="delivery_longitude"]').value;
+
+    if (!deliveryLat || !deliveryLon) {
+        e.preventDefault();
+        alert('⚠️ Please select a delivery location on the map!\n\nClick on the map or use the search box to set the customer delivery address.');
+
+        // Scroll to map
+        document.getElementById('delivery_map').scrollIntoView({ behavior: 'smooth', block: 'center' });
+        return false;
+    }
+});
 </script>
 {% endblock %}

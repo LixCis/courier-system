@@ -5,7 +5,7 @@
 
 {# Status Badge Macro #}
 {% macro status_badge(status, size='md') %}
-<span class="inline-flex rounded-full px-{% if size == 'lg' %}4{% else %}3{% endif %} py-{% if size == 'lg' %}2{% else %}1{% endif %} text-{% if size == 'lg' %}sm{% else %}xs{% endif %} font-semibold
+<span data-order-status="{{ status }}" class="inline-flex rounded-full px-{% if size == 'lg' %}4{% else %}3{% endif %} py-{% if size == 'lg' %}2{% else %}1{% endif %} text-{% if size == 'lg' %}sm{% else %}xs{% endif %} font-semibold
     {% if status == 'delivered' %}bg-green-100 text-green-800
     {% elif status == 'pending' %}bg-yellow-100 text-yellow-800
     {% elif status == 'cancelled' %}bg-red-100 text-red-800
@@ -83,11 +83,13 @@
             <div>
                 <dt class="text-sm font-medium text-gray-500">Assigned Courier</dt>
                 <dd class="mt-1 text-sm text-gray-900">
-                    {% if order.courier_user %}
-                        {{ order.courier_user.full_name }}
-                    {% else %}
-                        <span class="text-yellow-600">Not assigned yet</span>
-                    {% endif %}
+                    <span data-courier-info>
+                        {% if order.courier_user %}
+                            {{ order.courier_user.full_name }}
+                        {% else %}
+                            <span class="text-yellow-600">Not assigned yet</span>
+                        {% endif %}
+                    </span>
                 </dd>
             </div>
             {% elif field == 'order_value' %}
@@ -117,9 +119,9 @@
 <div class="mt-8">
     <h3 class="text-lg font-medium text-gray-900 mb-4">Delivery Timeline</h3>
     <div class="flow-root">
-        <ul role="list" class="-mb-8">
+        <ul role="list" class="-mb-8" data-delivery-logs>
             {% for log in logs %}
-            <li>
+            <li data-log-entry>
                 <div class="relative pb-8">
                     {% if not loop.last %}
                     <span class="absolute top-4 left-4 -ml-px h-full w-0.5 bg-gray-200" aria-hidden="true"></span>
