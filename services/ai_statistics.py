@@ -220,7 +220,8 @@ RULES:
 Personalized summary:"""
 
     try:
-        output = llm_service.llm(
+        # Use thread-safe generate() method instead of direct llm() access
+        output = llm_service.generate(
             prompt,
             max_tokens=300,
             temperature=0.2,  # Nízká pro lepší následování promptu
@@ -229,6 +230,10 @@ Personalized summary:"""
             stop=["\n\n\n", "YOUR STATISTICS", "RULES", "Task:"],
             echo=False
         )
+
+        if not output:
+            return "AI summary generation failed."
+
         summary = output['choices'][0]['text'].strip()
         return summary if summary else "AI summary generation failed."
     except Exception as e:
@@ -265,7 +270,8 @@ RULES:
 Your business insights:"""
 
     try:
-        output = llm_service.llm(
+        # Use thread-safe generate() method instead of direct llm() access
+        output = llm_service.generate(
             prompt,
             max_tokens=350,
             temperature=0.2,  # Nízká pro lepší následování promptu
@@ -274,6 +280,10 @@ Your business insights:"""
             stop=["\n\n\n", "YOUR BUSINESS", "RULES", "Task:"],
             echo=False
         )
+
+        if not output:
+            return "AI summary generation failed."
+
         summary = output['choices'][0]['text'].strip()
         return summary if summary else "AI summary generation failed."
     except Exception as e:
@@ -311,7 +321,8 @@ RULES:
 Your system analysis:"""
 
     try:
-        output = llm_service.llm(
+        # Use thread-safe generate() method instead of direct llm() access
+        output = llm_service.generate(
             prompt,
             max_tokens=400,
             temperature=0.2,  # Nízká pro lepší následování promptu
@@ -320,6 +331,10 @@ Your system analysis:"""
             stop=["\n\n\n", "YOUR SYSTEM", "RULES", "Task:"],
             echo=False
         )
+
+        if not output:
+            return "AI summary generation failed."
+
         summary = output['choices'][0]['text'].strip()
         return summary if summary else "AI summary generation failed."
     except Exception as e:

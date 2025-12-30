@@ -1,9 +1,9 @@
-from flask import Flask, render_template, redirect, url_for, flash, request
+from flask import Flask, render_template, redirect, url_for, flash, request, jsonify
 from flask_login import LoginManager, login_user, logout_user, login_required, current_user
 from functools import wraps
 from config import Config
 from models import db, User, Order, DeliveryLog, SavedCustomer
-from datetime import datetime
+from datetime import datetime, timezone
 import secrets
 import os
 import sys
@@ -72,6 +72,15 @@ def pregenerate_ai_insights():
 # Start AI pre-generation in background thread (only in main process, not reloader)
 import threading
 if os.environ.get('WERKZEUG_RUN_MAIN') == 'true':
+    # Pre-load LLM model BEFORE starting background threads
+    # This prevents race condition where multiple threads try to load model simultaneously
+    from services.llm_service import llm_service
+    print("\n[AI] Pre-loading LLM model before background tasks...")
+    if llm_service.is_available():
+        print("[AI] ✓ LLM model ready\n")
+    else:
+        print("[AI] ✗ LLM model not available, AI features will be disabled\n")
+
     ai_thread = threading.Thread(target=pregenerate_ai_insights, daemon=True)
     ai_thread.start()
 
@@ -553,24 +562,42 @@ def admin_toggle_courier_availability(courier_id):
 @app.route('/admin/analytics')
 @role_required('admin')
 def admin_analytics():
-    """Admin analytics page with system-wide AI insights"""
-    from services.ai_statistics import get_or_generate_ai_summary, calculate_admin_stats
+    """Admin analytics page with system-wide AI insights (loaded asynchronously)"""
+    from services.ai_statistics import calculate_admin_stats
 
-    # Get real-time stats
+    # Get real-time stats (fast, no AI blocking)
     stats = calculate_admin_stats()
 
-    # Get AI summary (cached or generate new)
-    ai_result = get_or_generate_ai_summary(
-        user_id=None,  # Admin summaries have no user_id
-        summary_type='admin_system',
-        force_refresh=request.args.get('refresh') == '1'
-    )
-
+    # AI insights are loaded asynchronously via /api/admin/ai-insights
     return render_template('admin/analytics.html',
-                         stats=stats,
-                         ai_summary=ai_result['summary_text'],
-                         ai_generated_at=ai_result['generated_at'],
-                         ai_is_cached=ai_result['is_cached'])
+                         stats=stats)
+
+
+@app.route('/api/admin/ai-insights')
+@role_required('admin')
+def api_admin_ai_insights():
+    """API endpoint to get admin AI insights asynchronously (read-only, no generation)"""
+    from models import AIStatisticsSummary
+
+    # Only read from cache - do NOT generate (to avoid connection pool exhaustion)
+    cached = AIStatisticsSummary.query.filter_by(
+        user_id=None,
+        summary_type='admin_system'
+    ).first()
+
+    if cached:
+        return jsonify({
+            'status': 'ready',
+            'summary': cached.summary_text,
+            'generated_at': cached.generated_at.isoformat(),
+            'is_cached': True
+        })
+
+    # No cache yet - still generating
+    return jsonify({
+        'status': 'loading',
+        'message': 'AI insights are being generated in the background...'
+    })
 
 
 @app.route('/admin/force-refresh-ai-cache', methods=['POST'])
@@ -578,10 +605,15 @@ def admin_analytics():
 def admin_force_refresh_ai_cache():
     """Force refresh all AI summary cache (for testing)"""
     from services.ai_statistics import clear_all_ai_cache
+    import threading
 
     deleted_count = clear_all_ai_cache()
 
-    flash(f'AI cache cleared successfully! {deleted_count} entries removed. New summaries will be generated on next view.', 'success')
+    # Start background regeneration
+    regen_thread = threading.Thread(target=pregenerate_ai_insights, daemon=True)
+    regen_thread.start()
+
+    flash(f'AI cache cleared successfully! {deleted_count} entries removed. New summaries are being generated in the background.', 'success')
     return redirect(request.referrer or url_for('admin_analytics'))
 
 
@@ -622,24 +654,42 @@ def restaurant_profile():
 @app.route('/restaurant/statistics')
 @role_required('restaurant')
 def restaurant_statistics():
-    """Restaurant statistics page with AI insights"""
-    from services.ai_statistics import get_or_generate_ai_summary, calculate_restaurant_stats
+    """Restaurant statistics page with AI insights (loaded asynchronously)"""
+    from services.ai_statistics import calculate_restaurant_stats
 
-    # Get real-time stats
+    # Get real-time stats (fast, no AI blocking)
     stats = calculate_restaurant_stats(current_user.id)
 
-    # Get AI summary (cached or generate new)
-    ai_result = get_or_generate_ai_summary(
-        user_id=current_user.id,
-        summary_type='restaurant_weekly',
-        force_refresh=request.args.get('refresh') == '1'
-    )
-
+    # AI insights are loaded asynchronously via /api/restaurant/ai-insights
     return render_template('restaurant/statistics.html',
-                         stats=stats,
-                         ai_summary=ai_result['summary_text'],
-                         ai_generated_at=ai_result['generated_at'],
-                         ai_is_cached=ai_result['is_cached'])
+                         stats=stats)
+
+
+@app.route('/api/restaurant/ai-insights')
+@role_required('restaurant')
+def api_restaurant_ai_insights():
+    """API endpoint to get restaurant AI insights asynchronously (read-only, no generation)"""
+    from models import AIStatisticsSummary
+
+    # Only read from cache - do NOT generate (to avoid connection pool exhaustion)
+    cached = AIStatisticsSummary.query.filter_by(
+        user_id=current_user.id,
+        summary_type='restaurant_weekly'
+    ).first()
+
+    if cached:
+        return jsonify({
+            'status': 'ready',
+            'summary': cached.summary_text,
+            'generated_at': cached.generated_at.isoformat(),
+            'is_cached': True
+        })
+
+    # No cache yet - still generating
+    return jsonify({
+        'status': 'loading',
+        'message': 'AI insights are being generated in the background...'
+    })
 
 
 @app.route('/restaurant/dashboard')
@@ -1120,24 +1170,42 @@ def courier_profile():
 @app.route('/courier/statistics')
 @role_required('courier')
 def courier_statistics():
-    """Courier statistics page with AI insights"""
-    from services.ai_statistics import get_or_generate_ai_summary, calculate_courier_stats
+    """Courier statistics page with AI insights (loaded asynchronously)"""
+    from services.ai_statistics import calculate_courier_stats
 
-    # Get real-time stats
+    # Get real-time stats (fast, no AI blocking)
     stats = calculate_courier_stats(current_user.id)
 
-    # Get AI summary (cached or generate new)
-    ai_result = get_or_generate_ai_summary(
-        user_id=current_user.id,
-        summary_type='courier_daily',
-        force_refresh=request.args.get('refresh') == '1'
-    )
-
+    # AI insights are loaded asynchronously via /api/courier/ai-insights
     return render_template('courier/statistics.html',
-                         stats=stats,
-                         ai_summary=ai_result['summary_text'],
-                         ai_generated_at=ai_result['generated_at'],
-                         ai_is_cached=ai_result['is_cached'])
+                         stats=stats)
+
+
+@app.route('/api/courier/ai-insights')
+@role_required('courier')
+def api_courier_ai_insights():
+    """API endpoint to get courier AI insights asynchronously (read-only, no generation)"""
+    from models import AIStatisticsSummary
+
+    # Only read from cache - do NOT generate (to avoid connection pool exhaustion)
+    cached = AIStatisticsSummary.query.filter_by(
+        user_id=current_user.id,
+        summary_type='courier_daily'
+    ).first()
+
+    if cached:
+        return jsonify({
+            'status': 'ready',
+            'summary': cached.summary_text,
+            'generated_at': cached.generated_at.isoformat(),
+            'is_cached': True
+        })
+
+    # No cache yet - still generating
+    return jsonify({
+        'status': 'loading',
+        'message': 'AI insights are being generated in the background...'
+    })
 
 
 @app.route('/courier/order/<int:order_id>/reject', methods=['POST'])
