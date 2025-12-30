@@ -76,6 +76,21 @@
             </div>
         </div>
 
+        {# Display Delivery Proof if exists #}
+        {% if order.delivery_proof_photo %}
+        <div class="bg-white shadow sm:rounded-lg mt-6">
+            <div class="px-4 py-5 sm:p-6">
+                <h3 class="text-base font-semibold leading-6 text-gray-900 mb-4">Delivery Proof</h3>
+                <img src="{{ url_for('static', filename='uploads/' + order.delivery_proof_photo) }}"
+                     alt="Delivery Proof"
+                     class="rounded-lg shadow-md max-w-md">
+
+                {# Display Image Analysis #}
+                {{ order_components.image_analysis(order.delivery_proof_analysis) }}
+            </div>
+        </div>
+        {% endif %}
+
         {# Delivery Metrics #}
         {{ order_components.delivery_metrics(order) }}
         </div>

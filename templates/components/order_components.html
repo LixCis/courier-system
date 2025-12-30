@@ -225,17 +225,81 @@
             </dd>
         </div>
 
-        {# Privacy Information #}
-        {% if analysis.faces_blurred and analysis.faces_blurred > 0 %}
-        <div class="bg-blue-50 border-blue-200 border rounded p-3 sm:col-span-2">
-            <dt class="text-xs font-medium text-blue-900">
+        {# AI Vision Analysis #}
+        {% if analysis.ai_description and analysis.ai_description != 'N/A' %}
+        <div class="{% if analysis.ai_legitimate %}bg-green-50 border-green-200{% else %}bg-red-50 border-red-200{% endif %} border rounded p-3 sm:col-span-2">
+            <dt class="text-xs font-medium {% if analysis.ai_legitimate %}text-green-900{% else %}text-red-900{% endif %}">
                 <svg class="inline h-4 w-4 mr-1" fill="currentColor" viewBox="0 0 20 20">
-                    <path fill-rule="evenodd" d="M2.166 4.999A11.954 11.954 0 0010 1.944 11.954 11.954 0 0017.834 5c.11.65.166 1.32.166 2.001 0 5.225-3.34 9.67-8 11.317C5.34 16.67 2 12.225 2 7c0-.682.057-1.35.166-2.001zm11.541 3.708a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd" />
+                    <path d="M10 12a2 2 0 100-4 2 2 0 000 4z"/>
+                    <path fill-rule="evenodd" d="M.458 10C1.732 5.943 5.522 3 10 3s8.268 2.943 9.542 7c-1.274 4.057-5.064 7-9.542 7S1.732 14.057.458 10zM14 10a4 4 0 11-8 0 4 4 0 018 0z" clip-rule="evenodd"/>
                 </svg>
-                Privacy Protection
+                AI Vision Analysis
+                {% if analysis.ai_confidence > 0 %}
+                <span class="ml-2 inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium
+                    {% if analysis.ai_confidence >= 80 %}bg-green-100 text-green-800
+                    {% elif analysis.ai_confidence >= 50 %}bg-yellow-100 text-yellow-800
+                    {% else %}bg-red-100 text-red-800{% endif %}">
+                    {{ analysis.ai_confidence }}% confidence
+                </span>
+                {% endif %}
             </dt>
-            <dd class="mt-1 text-xs text-blue-700">
-                {{ analysis.faces_blurred }} face(s) automatically blurred for privacy
+            <dd class="mt-1 text-xs {% if analysis.ai_legitimate %}text-green-700{% else %}text-red-700{% endif %}">
+                <p class="font-medium">{{ analysis.ai_description }}</p>
+
+                {# Raw AI responses (smaller text) #}
+                {% if analysis.ai_raw_answers and analysis.ai_raw_answers|length > 0 %}
+                <div class="mt-2 pt-2 border-t border-gray-200">
+                    <p class="text-[10px] text-gray-500 italic">What the model sees:</p>
+                    {% for answer in analysis.ai_raw_answers %}
+                    <p class="text-[10px] text-gray-400 mt-0.5">• {{ answer }}</p>
+                    {% endfor %}
+                </div>
+                {% endif %}
+
+                {% if analysis.ai_flags and analysis.ai_flags|length > 0 %}
+                <div class="mt-2 pt-2 border-t border-gray-200">
+                    <span class="font-medium text-red-800">Flags:</span>
+                    <ul class="mt-1 list-disc list-inside">
+                        {% for flag in analysis.ai_flags %}
+                        <li>{{ flag }}</li>
+                        {% endfor %}
+                    </ul>
+                </div>
+                {% endif %}
+            </dd>
+        </div>
+        {% endif %}
+
+        {# Image Metadata #}
+        {% if analysis.image_timestamp or analysis.camera_make or analysis.camera_model %}
+        <div class="bg-gray-50 border-gray-200 border rounded p-3 sm:col-span-2">
+            <dt class="text-xs font-medium text-gray-700">
+                <svg class="inline h-4 w-4 mr-1" fill="currentColor" viewBox="0 0 20 20">
+                    <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/>
+                </svg>
+                Photo Metadata
+            </dt>
+            <dd class="mt-1 text-xs text-gray-600">
+                <div class="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                    {% if analysis.image_timestamp %}
+                    <div>
+                        <span class="text-[10px] text-gray-500">Timestamp:</span>
+                        <p class="text-xs">{{ analysis.image_timestamp[:19] }}</p>
+                    </div>
+                    {% endif %}
+                    {% if analysis.camera_make %}
+                    <div>
+                        <span class="text-[10px] text-gray-500">Camera:</span>
+                        <p class="text-xs">{{ analysis.camera_make }}</p>
+                    </div>
+                    {% endif %}
+                    {% if analysis.camera_model %}
+                    <div>
+                        <span class="text-[10px] text-gray-500">Model:</span>
+                        <p class="text-xs">{{ analysis.camera_model }}</p>
+                    </div>
+                    {% endif %}
+                </div>
             </dd>
         </div>
         {% endif %}

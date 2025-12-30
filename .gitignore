@@ -8,3 +8,8 @@ instance/
 flask_session/
 models/
 static/uploads/
+
+# Transformers/HuggingFace cache
+.cache/
+huggingface/
+transformers_cache/

@@ -1229,31 +1229,44 @@ def courier_update_order_status(order_id):
             file.save(filepath)
             order.delivery_proof_photo = filename
 
-            # Process image (GPS extraction, quality check, privacy protection)
+            # Process image (GPS extraction, quality check, AI vision analysis)
             try:
-                from image_processing import process_delivery_image
-                analysis_result = process_delivery_image(filepath, apply_privacy_protection=True)
-                order.delivery_proof_analysis = {
-                    'gps_verified': analysis_result['metadata']['has_gps'],
-                    'gps_latitude': analysis_result['metadata']['gps_latitude'],
-                    'gps_longitude': analysis_result['metadata']['gps_longitude'],
-                    'gps_note': analysis_result['metadata']['gps_note'],
-                    'quality_score': analysis_result['quality']['quality_score'],
-                    'quality_acceptable': analysis_result['quality']['is_acceptable'],
-                    'quality_issues': analysis_result['quality']['issues'],
-                    'faces_blurred': analysis_result['privacy']['faces_blurred'],
-                    'summary': analysis_result['summary']
-                }
+                from services.image_analyzer import analyze_delivery_photo, get_analysis_for_db
+
+                # Get order description for AI context
+                order_desc = order.items_description or order.ai_enhanced_description
+
+                # Analyze photo with AI vision
+                analysis_result = analyze_delivery_photo(
+                    filepath,
+                    order_description=order_desc,
+                    use_ai_vision=True
+                )
+
+                # Store analysis in database
+                order.delivery_proof_analysis = get_analysis_for_db(analysis_result)
+
             except Exception as e:
-                # If processing fails (e.g., Pillow not installed), still allow upload
+                # If processing fails, still allow upload
+                print(f"[Image Analysis] Error: {e}")
                 order.delivery_proof_analysis = {
                     'error': str(e),
-                    'gps_note': 'Image processing not available - install Pillow to enable',
+                    'gps_verified': False,
+                    'gps_latitude': None,
+                    'gps_longitude': None,
+                    'gps_note': 'Image processing failed',
+                    'image_timestamp': None,
+                    'camera_make': None,
+                    'camera_model': None,
                     'quality_score': 0,
                     'quality_acceptable': True,  # Don't block uploads
                     'quality_issues': [],
-                    'faces_blurred': 0,
-                    'summary': 'Image uploaded (processing unavailable)'
+                    'ai_description': 'Analysis unavailable',
+                    'ai_confidence': 0,
+                    'ai_legitimate': True,
+                    'ai_flags': [],
+                    'ai_raw_answers': [],
+                    'summary': 'Image uploaded (processing failed)'
                 }
 
             # Log photo upload
