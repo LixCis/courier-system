@@ -154,3 +154,21 @@ class SavedCustomer(db.Model):
 
     def __repr__(self):
         return f'<SavedCustomer {self.customer_name}>'
+
+
+class AIStatisticsSummary(db.Model):
+    """Cache for AI-generated statistics summaries"""
+    __tablename__ = 'ai_statistics_summaries'
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)  # NULL for admin/system summaries
+    summary_type = db.Column(db.String(50), nullable=False)  # 'courier_daily', 'restaurant_weekly', 'admin_system'
+    summary_text = db.Column(db.Text, nullable=False)  # AI generated text
+    generated_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    stats_data = db.Column(db.JSON)  # Raw data used for AI generation (for debugging/re-generation)
+
+    # Relationship to user (optional)
+    user = db.relationship('User', backref='ai_summaries', lazy=True)
+
+    def __repr__(self):
+        return f'<AIStatisticsSummary {self.summary_type} - {self.generated_at}>'

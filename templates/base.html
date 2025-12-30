@@ -70,6 +70,9 @@
                                 <a href="{{ url_for('admin_users') }}" class="inline-flex items-center border-b-2 {% if request.endpoint == 'admin_users' %}border-indigo-500 text-gray-900{% else %}border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700{% endif %} px-1 pt-1 text-sm font-medium">
                                     Users
                                 </a>
+                                <a href="{{ url_for('admin_analytics') }}" class="inline-flex items-center border-b-2 {% if request.endpoint == 'admin_analytics' %}border-indigo-500 text-gray-900{% else %}border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700{% endif %} px-1 pt-1 text-sm font-medium">
+                                    Analytics
+                                </a>
                             {% elif current_user.role == 'restaurant' %}
                                 <a href="{{ url_for('restaurant_dashboard') }}" class="inline-flex items-center border-b-2 {% if request.endpoint == 'restaurant_dashboard' %}border-green-500 text-gray-900{% else %}border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700{% endif %} px-1 pt-1 text-sm font-medium">
                                     My Orders
@@ -77,12 +80,24 @@
                                 <a href="{{ url_for('restaurant_create_order') }}" class="inline-flex items-center border-b-2 {% if request.endpoint == 'restaurant_create_order' %}border-green-500 text-gray-900{% else %}border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700{% endif %} px-1 pt-1 text-sm font-medium">
                                     Create Order
                                 </a>
+                                <a href="{{ url_for('restaurant_order_history') }}" class="inline-flex items-center border-b-2 {% if request.endpoint == 'restaurant_order_history' %}border-green-500 text-gray-900{% else %}border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700{% endif %} px-1 pt-1 text-sm font-medium">
+                                    History
+                                </a>
+                                <a href="{{ url_for('restaurant_statistics') }}" class="inline-flex items-center border-b-2 {% if request.endpoint == 'restaurant_statistics' %}border-green-500 text-gray-900{% else %}border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700{% endif %} px-1 pt-1 text-sm font-medium">
+                                    Statistics
+                                </a>
                                 <a href="{{ url_for('restaurant_profile') }}" class="inline-flex items-center border-b-2 {% if request.endpoint == 'restaurant_profile' %}border-green-500 text-gray-900{% else %}border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700{% endif %} px-1 pt-1 text-sm font-medium">
                                     Profile
                                 </a>
                             {% elif current_user.role == 'courier' %}
                                 <a href="{{ url_for('courier_dashboard') }}" class="inline-flex items-center border-b-2 {% if request.endpoint == 'courier_dashboard' %}border-blue-500 text-gray-900{% else %}border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700{% endif %} px-1 pt-1 text-sm font-medium">
                                     My Deliveries
+                                </a>
+                                <a href="{{ url_for('courier_order_history') }}" class="inline-flex items-center border-b-2 {% if request.endpoint == 'courier_order_history' %}border-blue-500 text-gray-900{% else %}border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700{% endif %} px-1 pt-1 text-sm font-medium">
+                                    History
+                                </a>
+                                <a href="{{ url_for('courier_statistics') }}" class="inline-flex items-center border-b-2 {% if request.endpoint == 'courier_statistics' %}border-blue-500 text-gray-900{% else %}border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700{% endif %} px-1 pt-1 text-sm font-medium">
+                                    Statistics
                                 </a>
                                 <a href="{{ url_for('courier_profile') }}" class="inline-flex items-center border-b-2 {% if request.endpoint == 'courier_profile' %}border-blue-500 text-gray-900{% else %}border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700{% endif %} px-1 pt-1 text-sm font-medium">
                                     Profile

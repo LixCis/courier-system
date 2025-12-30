@@ -6,6 +6,7 @@ from models import db, User, Order, DeliveryLog, SavedCustomer
 from datetime import datetime
 import secrets
 import os
+import sys
 from werkzeug.utils import secure_filename
 from services.llm_service import enhance_order_description
 
@@ -32,6 +33,46 @@ login_manager.login_message = 'Please log in to access this page.'
 # Initialize background scheduler for pending orders
 from services.order_scheduler import init_scheduler
 scheduler = init_scheduler(app)
+
+
+# Pre-generate AI insights on startup
+def pregenerate_ai_insights():
+    """Pre-generate AI insights for all users on startup (runs in background)"""
+    import time
+    import threading
+
+    time.sleep(0.5)  # Wait 500ms for app to fully initialize
+
+    with app.app_context():
+        from services.ai_statistics import get_or_generate_ai_summary
+
+        print("\n[AI] Pre-generating insights for all users...")
+
+        try:
+            # Generate for all couriers
+            couriers = User.query.filter_by(role='courier').all()
+            for courier in couriers:
+                print(f"[AI] Generating insights for courier: {courier.full_name}")
+                get_or_generate_ai_summary(courier.id, 'courier_daily')
+
+            # Generate for all restaurants
+            restaurants = User.query.filter_by(role='restaurant').all()
+            for restaurant in restaurants:
+                print(f"[AI] Generating insights for restaurant: {restaurant.full_name}")
+                get_or_generate_ai_summary(restaurant.id, 'restaurant_weekly')
+
+            # Generate admin summary
+            print(f"[AI] Generating system-wide insights for admin")
+            get_or_generate_ai_summary(None, 'admin_system')
+
+            print("[AI] ✓ All insights pre-generated successfully!\n")
+        except Exception as e:
+            print(f"[AI] Error pre-generating insights: {e}\n")
+
+# Start AI pre-generation in background thread
+import threading
+ai_thread = threading.Thread(target=pregenerate_ai_insights, daemon=True)
+ai_thread.start()
 
 
 @login_manager.user_loader
@@ -481,6 +522,41 @@ def admin_toggle_courier_availability(courier_id):
     return redirect(request.referrer or url_for('admin_users'))
 
 
+@app.route('/admin/analytics')
+@role_required('admin')
+def admin_analytics():
+    """Admin analytics page with system-wide AI insights"""
+    from services.ai_statistics import get_or_generate_ai_summary, calculate_admin_stats
+
+    # Get real-time stats
+    stats = calculate_admin_stats()
+
+    # Get AI summary (cached or generate new)
+    ai_result = get_or_generate_ai_summary(
+        user_id=None,  # Admin summaries have no user_id
+        summary_type='admin_system',
+        force_refresh=request.args.get('refresh') == '1'
+    )
+
+    return render_template('admin/analytics.html',
+                         stats=stats,
+                         ai_summary=ai_result['summary_text'],
+                         ai_generated_at=ai_result['generated_at'],
+                         ai_is_cached=ai_result['is_cached'])
+
+
+@app.route('/admin/force-refresh-ai-cache', methods=['POST'])
+@role_required('admin')
+def admin_force_refresh_ai_cache():
+    """Force refresh all AI summary cache (for testing)"""
+    from services.ai_statistics import clear_all_ai_cache
+
+    deleted_count = clear_all_ai_cache()
+
+    flash(f'AI cache cleared successfully! {deleted_count} entries removed. New summaries will be generated on next view.', 'success')
+    return redirect(request.referrer or url_for('admin_analytics'))
+
+
 # ==================== Restaurant Routes ====================
 
 @app.route('/restaurant/profile', methods=['GET', 'POST'])
@@ -513,6 +589,29 @@ def restaurant_profile():
         return redirect(url_for('restaurant_dashboard'))
 
     return render_template('restaurant/profile.html')
+
+
+@app.route('/restaurant/statistics')
+@role_required('restaurant')
+def restaurant_statistics():
+    """Restaurant statistics page with AI insights"""
+    from services.ai_statistics import get_or_generate_ai_summary, calculate_restaurant_stats
+
+    # Get real-time stats
+    stats = calculate_restaurant_stats(current_user.id)
+
+    # Get AI summary (cached or generate new)
+    ai_result = get_or_generate_ai_summary(
+        user_id=current_user.id,
+        summary_type='restaurant_weekly',
+        force_refresh=request.args.get('refresh') == '1'
+    )
+
+    return render_template('restaurant/statistics.html',
+                         stats=stats,
+                         ai_summary=ai_result['summary_text'],
+                         ai_generated_at=ai_result['generated_at'],
+                         ai_is_cached=ai_result['is_cached'])
 
 
 @app.route('/restaurant/dashboard')
@@ -993,6 +1092,29 @@ def courier_profile():
         return redirect(url_for('courier_dashboard'))
 
     return render_template('courier/profile.html')
+
+
+@app.route('/courier/statistics')
+@role_required('courier')
+def courier_statistics():
+    """Courier statistics page with AI insights"""
+    from services.ai_statistics import get_or_generate_ai_summary, calculate_courier_stats
+
+    # Get real-time stats
+    stats = calculate_courier_stats(current_user.id)
+
+    # Get AI summary (cached or generate new)
+    ai_result = get_or_generate_ai_summary(
+        user_id=current_user.id,
+        summary_type='courier_daily',
+        force_refresh=request.args.get('refresh') == '1'
+    )
+
+    return render_template('courier/statistics.html',
+                         stats=stats,
+                         ai_summary=ai_result['summary_text'],
+                         ai_generated_at=ai_result['generated_at'],
+                         ai_is_cached=ai_result['is_cached'])
 
 
 @app.route('/courier/order/<int:order_id>/reject', methods=['POST'])
@@ -1672,6 +1794,148 @@ def seed_db():
         print('Courier: john_courier / courier123')
         print('Courier: jane_courier / courier123')
         print('Courier: mike_courier / courier123')
+
+
+@app.cli.command()
+def seed_enhanced():
+    """Seed database with enhanced realistic data for AI statistics"""
+    with app.app_context():
+        from datetime import timedelta
+        import random
+
+        # Run normal seed first
+        print("Running basic seed...")
+        if not User.query.first():
+            print("No users found, running standard seed first...")
+            os.system(f"{sys.executable} -m flask seed-db")
+
+        # Get users
+        restaurant1 = User.query.filter_by(username='pizza_palace').first()
+        restaurant2 = User.query.filter_by(username='burger_king').first()
+        courier1 = User.query.filter_by(username='john_courier').first()
+        courier2 = User.query.filter_by(username='jane_courier').first()
+        courier3 = User.query.filter_by(username='mike_courier').first()
+
+        if not all([restaurant1, restaurant2, courier1, courier2, courier3]):
+            print("Error: Users not found. Run 'flask seed-db' first.")
+            return
+
+        # Sample areas in Ostrava
+        delivery_areas = [
+            {'area': 'Poruba', 'lat': 49.8209, 'lon': 18.1625, 'address': 'Opavská 1234, Poruba'},
+            {'area': 'Stodolní', 'lat': 49.8385, 'lon': 18.2875, 'address': 'Stodolní 15, Moravská Ostrava'},
+            {'area': 'Vítkovice', 'lat': 49.7987, 'lon': 18.2656, 'address': 'Ruská 567, Vítkovice'},
+            {'area': 'Dubina', 'lat': 49.8123, 'lon': 18.2945, 'address': 'Dubinská 890, Dubina'},
+            {'area': 'Zábřeh', 'lat': 49.8456, 'lon': 18.2234, 'address': 'Výškovická 321, Zábřeh'},
+            {'area': 'Mariánské Hory', 'lat': 49.8234, 'lon': 18.2678, 'address': 'Horní 456, Mariánské Hory'},
+        ]
+
+        # Sample food items
+        food_items = [
+            "2x Pizza Margherita, 1x Coca Cola",
+            "Velký burger s hranolky, 2x kečup",
+            "3x Sushi set, wasabi extra",
+            "Pizza Pepperoni (velká), 2x sprite",
+            "Burger menu, bez okurek, přidat sýr",
+            "4x Pizza (2x Margherita, 2x Salami)",
+            "Kebab box, extra omáčka",
+            "2x Burger, 3x hranolky, 2x cola",
+        ]
+
+        print("\nGenerating enhanced order data...")
+
+        orders_created = 0
+        now = datetime.utcnow()
+
+        # Generate orders for last 14 days
+        for days_ago in range(14):
+            day_date = now - timedelta(days=days_ago)
+
+            # More orders on weekends
+            num_orders_per_day = random.randint(8, 15) if day_date.weekday() >= 5 else random.randint(4, 8)
+
+            for _ in range(num_orders_per_day):
+                # Random restaurant
+                restaurant = random.choice([restaurant1, restaurant2])
+
+                # Random delivery area
+                delivery_loc = random.choice(delivery_areas)
+
+                # Random time during the day (lunch 11-14, dinner 17-22)
+                if random.random() > 0.5:
+                    hour = random.randint(11, 14)  # Lunch
+                else:
+                    hour = random.randint(17, 22)  # Dinner
+
+                minute = random.randint(0, 59)
+                created_time = day_date.replace(hour=hour, minute=minute, second=0, microsecond=0)
+
+                # Create order
+                order_number = f"ORD-{created_time.strftime('%Y%m%d')}-{secrets.token_hex(4).upper()}"
+
+                order = Order(
+                    order_number=order_number,
+                    restaurant_id=restaurant.id,
+                    restaurant_name=restaurant.full_name,
+                    customer_name=random.choice(['Jan Novák', 'Petra Svobodová', 'Martin Dvořák', 'Eva Kučerová', 'Tomáš Procházka']),
+                    customer_phone=f"+420{random.randint(600000000, 799999999)}",
+                    delivery_address=delivery_loc['address'],
+                    pickup_address=restaurant.current_location,
+                    items_description=random.choice(food_items),
+                    order_value=random.randint(150, 800),
+                    status='delivered',  # Most are delivered
+                    pickup_latitude=restaurant.last_known_latitude,
+                    pickup_longitude=restaurant.last_known_longitude,
+                    delivery_latitude=delivery_loc['lat'],
+                    delivery_longitude=delivery_loc['lon'],
+                    created_at=created_time
+                )
+
+                # Assign courier and set timestamps
+                courier = random.choice([courier1, courier2, courier3])
+                order.courier_id = courier.id
+
+                # Realistic timestamps
+                order.assigned_at = created_time + timedelta(minutes=random.randint(1, 5))
+                order.picked_up_at = order.assigned_at + timedelta(minutes=random.randint(5, 15))
+                order.in_transit_at = order.picked_up_at + timedelta(seconds=5)
+                order.delivered_at = order.in_transit_at + timedelta(minutes=random.randint(10, 30))
+
+                # Update courier stats
+                courier.total_deliveries += 1
+                courier.successful_deliveries += 1
+
+                db.session.add(order)
+                orders_created += 1
+
+                # Occasionally add a cancelled order
+                if random.random() < 0.1:  # 10% cancelled
+                    cancelled_order = Order(
+                        order_number=f"ORD-{created_time.strftime('%Y%m%d')}-{secrets.token_hex(4).upper()}",
+                        restaurant_id=restaurant.id,
+                        restaurant_name=restaurant.full_name,
+                        customer_name=random.choice(['Jan Novák', 'Petra Svobodová']),
+                        customer_phone=f"+420{random.randint(600000000, 799999999)}",
+                        delivery_address=delivery_loc['address'],
+                        pickup_address=restaurant.current_location,
+                        items_description=random.choice(food_items),
+                        order_value=random.randint(150, 800),
+                        status='cancelled',
+                        pickup_latitude=restaurant.last_known_latitude,
+                        pickup_longitude=restaurant.last_known_longitude,
+                        delivery_latitude=delivery_loc['lat'],
+                        delivery_longitude=delivery_loc['lon'],
+                        created_at=created_time + timedelta(minutes=5)
+                    )
+                    db.session.add(cancelled_order)
+                    orders_created += 1
+
+        db.session.commit()
+
+        print(f'\n[SUCCESS] Enhanced seed completed!')
+        print(f'   - Created {orders_created} historical orders')
+        print(f'   - Courier stats updated')
+        print(f'   - Ready for AI statistics generation!')
 
 
 if __name__ == '__main__':
