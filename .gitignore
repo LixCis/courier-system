@@ -7,3 +7,4 @@ venv/
 instance/
 flask_session/
 models/
+static/uploads/
