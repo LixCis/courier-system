@@ -3,7 +3,7 @@ AI Statistics Service - Generates AI-powered insights with caching
 """
 from datetime import datetime, timedelta
 from models import db, Order, User, DeliveryLog, AIStatisticsSummary
-from services.llm_service import LLMService
+from services.llm_service import llm_service  # Use global instance for thread safety
 from sqlalchemy import func
 
 
@@ -192,12 +192,11 @@ def calculate_admin_stats():
 
 
 def generate_courier_ai_summary(stats):
-    """Generate AI summary for courier using LLM"""
+    """Generate AI summary for courier using LLM (uses global thread-safe instance)"""
     if not stats:
         return "Statistics not available."
 
-    llm = LLMService()
-    if not llm.is_available():
+    if not llm_service.is_available():
         return "AI summary temporarily unavailable. AI model is not loaded."
 
     prompt = f"""Task: Create a personalized summary for courier {stats['courier_name']}.
@@ -221,7 +220,7 @@ RULES:
 Personalized summary:"""
 
     try:
-        output = llm.llm(
+        output = llm_service.llm(
             prompt,
             max_tokens=300,
             temperature=0.2,  # Nízká pro lepší následování promptu
@@ -238,12 +237,11 @@ Personalized summary:"""
 
 
 def generate_restaurant_ai_summary(stats):
-    """Generate AI summary for restaurant using LLM"""
+    """Generate AI summary for restaurant using LLM (uses global thread-safe instance)"""
     if not stats:
         return "Statistics not available."
 
-    llm = LLMService()
-    if not llm.is_available():
+    if not llm_service.is_available():
         return "AI summary temporarily unavailable. AI model is not loaded."
 
     prompt = f"""Task: Create business insights for restaurant {stats['restaurant_name']}.
@@ -267,7 +265,7 @@ RULES:
 Your business insights:"""
 
     try:
-        output = llm.llm(
+        output = llm_service.llm(
             prompt,
             max_tokens=350,
             temperature=0.2,  # Nízká pro lepší následování promptu
@@ -284,12 +282,11 @@ Your business insights:"""
 
 
 def generate_admin_ai_summary(stats):
-    """Generate AI summary for admin using LLM"""
+    """Generate AI summary for admin using LLM (uses global thread-safe instance)"""
     if not stats:
         return "Statistics not available."
 
-    llm = LLMService()
-    if not llm.is_available():
+    if not llm_service.is_available():
         return "AI summary temporarily unavailable. AI model is not loaded."
 
     prompt = f"""Task: Create a system overview for the administrator.
@@ -314,7 +311,7 @@ RULES:
 Your system analysis:"""
 
     try:
-        output = llm.llm(
+        output = llm_service.llm(
             prompt,
             max_tokens=400,
             temperature=0.2,  # Nízká pro lepší následování promptu

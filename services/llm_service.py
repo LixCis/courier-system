@@ -7,6 +7,7 @@ application startup.
 """
 
 import os
+import threading
 from pathlib import Path
 
 
@@ -27,51 +28,59 @@ class LLMService:
         """
         self.llm = None
         self._model_loaded = False
+        self._lock = threading.Lock()  # Thread safety for model access
 
         # Default model path
         if model_path is None:
-            self.model_path = Path("models/llama-3.2-1b.gguf")
+            self.model_path = Path("models/llama-3.2-3b.gguf")
         else:
             self.model_path = Path(model_path)
 
     def _load_model(self):
         """
-        Lazy load the LLM model
+        Lazy load the LLM model (thread-safe)
 
         Only loads once, subsequent calls do nothing.
         Returns True if model loaded successfully, False otherwise.
         """
+        # Quick check without lock
         if self._model_loaded:
             return True
 
-        # Check if model file exists
-        if not self.model_path.exists():
-            print(f"WARNING: LLM model not found at {self.model_path}")
-            print(f"AI description enhancement will be disabled.")
-            print(f"To enable AI features, download llama-3.2-1b.gguf and place it in models/ directory")
-            return False
+        # Acquire lock for thread-safe loading
+        with self._lock:
+            # Double-check after acquiring lock (another thread might have loaded it)
+            if self._model_loaded:
+                return True
 
-        try:
-            from llama_cpp import Llama
+            # Check if model file exists
+            if not self.model_path.exists():
+                print(f"WARNING: LLM model not found at {self.model_path}")
+                print(f"AI description enhancement will be disabled.")
+                print(f"To enable AI features, download llama-3.2-3b.gguf and place it in models/ directory")
+                return False
 
-            print(f"Loading LLM model from {self.model_path}...")
-            self.llm = Llama(
-                model_path=str(self.model_path),
-                n_ctx=512,  # Context window (tokens)
-                n_threads=4,  # CPU threads to use
-                verbose=False  # Suppress verbose output
-            )
-            self._model_loaded = True
-            print("LLM model loaded successfully!")
-            return True
+            try:
+                from llama_cpp import Llama
 
-        except ImportError:
-            print("ERROR: llama-cpp-python not installed!")
-            print("Install it with: pip install llama-cpp-python")
-            return False
-        except Exception as e:
-            print(f"ERROR loading LLM model: {e}")
-            return False
+                print(f"Loading LLM model from {self.model_path}...")
+                self.llm = Llama(
+                    model_path=str(self.model_path),
+                    n_ctx=512,  # Context window (tokens)
+                    n_threads=4,  # CPU threads to use
+                    verbose=False  # Suppress verbose output
+                )
+                self._model_loaded = True
+                print("LLM model loaded successfully!")
+                return True
+
+            except ImportError:
+                print("ERROR: llama-cpp-python not installed!")
+                print("Install it with: pip install llama-cpp-python")
+                return False
+            except Exception as e:
+                print(f"ERROR loading LLM model: {e}")
+                return False
 
     def is_available(self):
         """
@@ -87,6 +96,7 @@ class LLMService:
     def enhance_description(self, raw_description):
         """
         Standardize and enhance order item description using AI
+        Thread-safe with lock to prevent concurrent model access.
 
         Args:
             raw_description: Original description text from restaurant
@@ -102,9 +112,12 @@ class LLMService:
         if not self.is_available():
             return None
 
-        try:
-            # Craft prompt with examples for better results
-            prompt = f"""Úkol: Standardizuj popis jídla. Zachovej všechny informace a používej správnou češtinu.
+        # CRITICAL: Use lock to prevent concurrent access to llama.cpp model
+        # Without this, multiple threads calling the model simultaneously cause crashes
+        with self._lock:
+            try:
+                # Craft prompt with examples for better results
+                prompt = f"""Úkol: Standardizuj popis jídla. Zachovej všechny informace a používej správnou češtinu.
 
 Příklady:
 
@@ -122,30 +135,44 @@ Nyní standardizuj tento popis:
 
 Standardizovaný popis:"""
 
-            # Generate response with strict parameters
-            output = self.llm(
-                prompt,
-                max_tokens=256,  # Shorter max length for concise output
-                temperature=0.1,  # Very low = more deterministic
-                top_p=0.85,  # Slightly lower for more focused output
-                repeat_penalty=1.1,  # Penalize repetition
-                stop=["Původní:", "Nyní standardizuj", "\n\n"],  # Stop tokens
-                echo=False  # Don't include prompt in output
-            )
+                # Generate response with strict parameters
+                output = self.llm(
+                    prompt,
+                    max_tokens=256,  # Shorter max length for concise output
+                    temperature=0.1,  # Very low = more deterministic
+                    top_p=0.85,  # Slightly lower for more focused output
+                    repeat_penalty=1.1,  # Penalize repetition
+                    stop=["Původní:", "Nyní standardizuj", "\n\n"],  # Stop tokens
+                    echo=False  # Don't include prompt in output
+                )
 
-            # Extract generated text
-            enhanced = output['choices'][0]['text'].strip()
+                # Extract generated text
+                enhanced = output['choices'][0]['text'].strip()
 
-            # Basic validation - if response is too short or suspiciously long, return None
-            if len(enhanced) < 5 or len(enhanced) > len(raw_description) * 3:
-                print(f"WARNING: AI response looks invalid (length: {len(enhanced)})")
+                # Basic validation
+                if len(enhanced) < 5:
+                    print(f"WARNING: AI response too short (length: {len(enhanced)})")
+                    return None
+
+                # Allow reasonable expansion - short inputs can expand more
+                max_allowed_length = max(
+                    len(raw_description) * 10,  # Allow up to 10x expansion for short inputs
+                    500  # But cap at 500 characters absolute maximum
+                )
+
+                if len(enhanced) > max_allowed_length:
+                    print(f"WARNING: AI response suspiciously long")
+                    print(f"  Input ({len(raw_description)} chars): {raw_description[:100]}")
+                    print(f"  Output ({len(enhanced)} chars): {enhanced[:100]}")
+                    return None
+
+                # Log successful enhancement for debugging
+                print(f"[AI] Enhanced: '{raw_description[:50]}...' -> '{enhanced[:50]}...' ({len(raw_description)} -> {len(enhanced)} chars)")
+                return enhanced
+
+            except Exception as e:
+                print(f"ERROR during AI description enhancement: {e}")
                 return None
-
-            return enhanced
-
-        except Exception as e:
-            print(f"ERROR during AI description enhancement: {e}")
-            return None
 
 
 # Global instance (lazy-loaded)

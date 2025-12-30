@@ -69,10 +69,11 @@ def pregenerate_ai_insights():
         except Exception as e:
             print(f"[AI] Error pre-generating insights: {e}\n")
 
-# Start AI pre-generation in background thread
+# Start AI pre-generation in background thread (only in main process, not reloader)
 import threading
-ai_thread = threading.Thread(target=pregenerate_ai_insights, daemon=True)
-ai_thread.start()
+if os.environ.get('WERKZEUG_RUN_MAIN') == 'true':
+    ai_thread = threading.Thread(target=pregenerate_ai_insights, daemon=True)
+    ai_thread.start()
 
 
 @login_manager.user_loader
