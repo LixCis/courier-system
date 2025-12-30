@@ -200,24 +200,25 @@ def generate_courier_ai_summary(stats):
     if not llm.is_available():
         return "AI summary temporarily unavailable. AI model is not loaded."
 
-    prompt = f"""Úkol: Vytvoř personalizované shrnutí pro kurýra {stats['courier_name']}.
+    prompt = f"""Task: Create a personalized summary for courier {stats['courier_name']}.
 
-VAŠE STATISTIKY:
-Dnes: {stats['today']['total_deliveries']} doručení, průměrný čas {stats['today']['avg_delivery_time']} min, hodnota {stats['today']['total_value']:.0f} Kč
-Týden: {stats['week']['total_deliveries']} doručení, průměrný čas {stats['week']['avg_delivery_time']} min
-Celkem: {stats['all_time']['total_deliveries']} úspěšných, {stats['all_time']['rejected_orders']} odmítnutých (success rate {stats['all_time']['success_rate']:.1f}%)
-Vaše nejčastější oblasti: {', '.join(stats['top_areas']) if stats['top_areas'] else 'žádné zatím'}
-Vozidlo: {stats['vehicle_type']}
+YOUR STATISTICS:
+Today: {stats['today']['total_deliveries']} deliveries, avg time {stats['today']['avg_delivery_time']} min, value {stats['today']['total_value']:.0f} CZK
+This week: {stats['week']['total_deliveries']} deliveries, avg time {stats['week']['avg_delivery_time']} min
+Total: {stats['all_time']['total_deliveries']} successful, {stats['all_time']['rejected_orders']} rejected (success rate {stats['all_time']['success_rate']:.1f}%)
+Your most frequent areas: {', '.join(stats['top_areas']) if stats['top_areas'] else 'none yet'}
+Vehicle: {stats['vehicle_type']}
 
-PRAVIDLA:
-- Mluv přímo k uživateli (používej "máte", "vaše", "jste")
-- Analyzuj JEN jeho čísla (bez srovnání s ostatními)
-- Pokud má 0 doručení dnes, řekni "Dnes jste ještě nic nedoručili"
-- Doporučení přímo pro něj (např. "Zkuste optimalizovat trasy v Porubě")
-- Pokud má málo dat, uznej to ("Zatím máte málo dat pro detailní analýzu")
-- 3-5 vět, motivující tón, česky, pár emoji
+RULES:
+- Speak directly to the user (use "you", "your")
+- Analyze ONLY their numbers (no comparison with others)
+- If 0 deliveries today, say "You haven't delivered anything today yet"
+- Give recommendations directly for them (e.g., "Try optimizing routes in Poruba")
+- If little data, acknowledge it ("You have limited data for detailed analysis yet")
+- 3-5 sentences, motivating tone, use a few emojis
+- Output MUST be in English
 
-Personalizované shrnutí:"""
+Personalized summary:"""
 
     try:
         output = llm.llm(
@@ -226,7 +227,7 @@ Personalizované shrnutí:"""
             temperature=0.2,  # Nízká pro lepší následování promptu
             top_p=0.85,
             repeat_penalty=1.15,
-            stop=["\n\n\n", "Statistiky", "VAŠE", "PRAVIDLA"],
+            stop=["\n\n\n", "YOUR STATISTICS", "RULES", "Task:"],
             echo=False
         )
         summary = output['choices'][0]['text'].strip()
@@ -245,24 +246,25 @@ def generate_restaurant_ai_summary(stats):
     if not llm.is_available():
         return "AI summary temporarily unavailable. AI model is not loaded."
 
-    prompt = f"""Úkol: Vytvoř business insights pro restauraci {stats['restaurant_name']}.
+    prompt = f"""Task: Create business insights for restaurant {stats['restaurant_name']}.
 
-VAŠE BUSINESS DATA:
-Tento týden: {stats['week']['total_orders']} objednávek ({stats['week']['delivered']} doručeno), tržby {stats['week']['total_value']:.0f} Kč, průměr {stats['week']['avg_order_value']:.0f} Kč/objednávka
-Tento měsíc: {stats['month']['total_orders']} objednávek, tržby {stats['month']['total_value']:.0f} Kč
-Celková historie: {stats['all_time']['total_orders']} objednávek ({stats['all_time']['delivered']} doručeno, {stats['all_time']['cancelled']} zrušeno)
-Vaše nejžádanější oblasti: {', '.join(stats['top_delivery_areas']) if stats['top_delivery_areas'] else 'zatím žádné'}
-Vaše nejaktivnější hodiny: {stats['peak_hours']}
+YOUR BUSINESS DATA:
+This week: {stats['week']['total_orders']} orders ({stats['week']['delivered']} delivered), revenue {stats['week']['total_value']:.0f} CZK, average {stats['week']['avg_order_value']:.0f} CZK/order
+This month: {stats['month']['total_orders']} orders, revenue {stats['month']['total_value']:.0f} CZK
+Total history: {stats['all_time']['total_orders']} orders ({stats['all_time']['delivered']} delivered, {stats['all_time']['cancelled']} cancelled)
+Your most requested areas: {', '.join(stats['top_delivery_areas']) if stats['top_delivery_areas'] else 'none yet'}
+Your peak hours: {stats['peak_hours']}
 
-PRAVIDLA:
-- Mluv přímo k restauraci (používej "máte", "vaše", "můžete")
-- Analyzuj JEN jejich čísla (bez "trendů na trhu" nebo "konkurence")
-- Porovnej jejich data (týden vs měsíc: roste? klesá? stabilní?)
-- Doporučení přímo pro ně z jejich dat (např. "Vysoký podíl zrušených objednávek - zkuste zkrátit čas přípravy")
-- Pokud mají málo dat, řekni "Zatím máte málo dat pro detailní analýzu"
-- 4-6 vět, profesionální ale přátelský tón, česky, pár emoji
+RULES:
+- Speak directly to the restaurant (use "you", "your")
+- Analyze ONLY their numbers (no "market trends" or "competition")
+- Compare their data (week vs month: growing? declining? stable?)
+- Give recommendations directly from their data (e.g., "High cancellation rate - try reducing preparation time")
+- If little data, acknowledge it ("You have limited data for detailed analysis yet")
+- 4-6 sentences, professional but friendly tone, use a few emojis
+- Output MUST be in English
 
-Vaše business insights:"""
+Your business insights:"""
 
     try:
         output = llm.llm(
@@ -271,7 +273,7 @@ Vaše business insights:"""
             temperature=0.2,  # Nízká pro lepší následování promptu
             top_p=0.85,
             repeat_penalty=1.15,
-            stop=["\n\n\n", "VAŠE", "PRAVIDLA", "Týdenní"],
+            stop=["\n\n\n", "YOUR BUSINESS", "RULES", "Task:"],
             echo=False
         )
         summary = output['choices'][0]['text'].strip()
@@ -290,25 +292,26 @@ def generate_admin_ai_summary(stats):
     if not llm.is_available():
         return "AI summary temporarily unavailable. AI model is not loaded."
 
-    prompt = f"""Úkol: Vytvoř systémový přehled pro administrátora.
+    prompt = f"""Task: Create a system overview for the administrator.
 
-DATA VAŠEHO SYSTÉMU:
-Dnes: {stats['today']['total_orders']} objednávek ({stats['today']['pending']} čeká, {stats['today']['active']} aktivní, {stats['today']['delivered']} hotovo)
-Vaši kurýři: {stats['system']['active_couriers']} aktivních / {stats['system']['total_couriers']} celkem (využití {stats['system']['courier_utilization']:.1f}%)
-Vaše restaurace: {stats['system']['total_restaurants']} aktivních
-Celková výkonnost: {stats['performance']['total_deliveries']} doručeno, průměr {stats['performance']['avg_delivery_time']} min, úspěšnost {stats['performance']['success_rate']:.1f}%
-Nejlepší kurýři: {', '.join(stats['top_performing_couriers']) if stats['top_performing_couriers'] else 'zatím žádní'}
-Nejaktivnější restaurace: {', '.join(stats['busiest_restaurants']) if stats['busiest_restaurants'] else 'zatím žádné'}
+YOUR SYSTEM DATA:
+Today: {stats['today']['total_orders']} orders ({stats['today']['pending']} pending, {stats['today']['active']} active, {stats['today']['delivered']} completed)
+Your couriers: {stats['system']['active_couriers']} active / {stats['system']['total_couriers']} total (utilization {stats['system']['courier_utilization']:.1f}%)
+Your restaurants: {stats['system']['total_restaurants']} active
+Overall performance: {stats['performance']['total_deliveries']} delivered, average {stats['performance']['avg_delivery_time']} min, success rate {stats['performance']['success_rate']:.1f}%
+Top couriers: {', '.join(stats['top_performing_couriers']) if stats['top_performing_couriers'] else 'none yet'}
+Busiest restaurants: {', '.join(stats['busiest_restaurants']) if stats['busiest_restaurants'] else 'none yet'}
 
-PRAVIDLA:
-- Mluv přímo k adminovi (používej "máte", "váš systém", "můžete")
-- Analyzuj JEN tato reálná čísla (žádné předpoklady o "ideálním stavu")
-- Identifikuj problémy pokud jsou viditelné v datech (např. "Máte 8 čekajících objednávek ale jen 1 aktivní kurýr")
-- Doporučení přímo z dat (např. "Nízké využití kurýrů - zvažte přidat další restaurace")
-- Pokud je všechno v pořádku, řekni "Systém běží bez problémů"
-- 5-7 vět, analytický ale přímý tón, česky, občas emoji
+RULES:
+- Speak directly to the admin (use "you", "your system")
+- Analyze ONLY these real numbers (no assumptions about "ideal state")
+- Identify problems if visible in data (e.g., "You have 8 pending orders but only 1 active courier")
+- Give recommendations directly from data (e.g., "Low courier utilization - consider adding more restaurants")
+- If everything is fine, say "System is running smoothly"
+- 5-7 sentences, analytical but direct tone, use emojis occasionally
+- Output MUST be in English
 
-Analýza vašeho systému:"""
+Your system analysis:"""
 
     try:
         output = llm.llm(
@@ -317,7 +320,7 @@ Analýza vašeho systému:"""
             temperature=0.2,  # Nízká pro lepší následování promptu
             top_p=0.85,
             repeat_penalty=1.15,
-            stop=["\n\n\n", "DATA", "PRAVIDLA", "Dnešní"],
+            stop=["\n\n\n", "YOUR SYSTEM", "RULES", "Task:"],
             echo=False
         )
         summary = output['choices'][0]['text'].strip()

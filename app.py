@@ -97,6 +97,22 @@ def role_required(*roles):
     return decorator
 
 
+def enhance_in_background(order_id, description):
+    """Background task to enhance order description with AI"""
+    with app.app_context():
+        try:
+            ai_enhanced = enhance_order_description(description)
+            if ai_enhanced:
+                # Update order with AI description
+                order_to_update = Order.query.get(order_id)
+                if order_to_update:
+                    order_to_update.ai_enhanced_description = ai_enhanced
+                    db.session.commit()
+                    print(f"[AI] Description updated for order {order_to_update.order_number}")
+        except Exception as e:
+            print(f"[AI] Error enhancing order description in background: {e}")
+
+
 def auto_transition_order_statuses():
     """Automatically transition orders from picked_up to in_transit after 3 seconds
     Returns set of order IDs that were recently transitioned (within last 10 seconds)"""
@@ -337,6 +353,17 @@ def admin_view_order(order_id):
 
     order = Order.query.get_or_404(order_id)
     logs = DeliveryLog.query.filter_by(order_id=order.id).order_by(DeliveryLog.timestamp.desc()).all()
+
+    # If AI description is missing, generate it in background
+    if not order.ai_enhanced_description and order.items_description:
+        import threading
+        bg_thread = threading.Thread(
+            target=enhance_in_background,
+            args=(order.id, order.items_description),
+            daemon=True
+        )
+        bg_thread.start()
+        print(f"[AI] Started background generation for order {order.order_number}")
 
     return render_template('admin/view_order.html', order=order, logs=logs)
 
@@ -749,24 +776,8 @@ def restaurant_create_order():
         db.session.commit()
 
         # Start AI description enhancement in background (non-blocking)
-        import threading
-        def enhance_in_background(order_id, description):
-            """Background task to enhance order description with AI"""
-            with app.app_context():
-                try:
-                    ai_enhanced = enhance_order_description(description)
-                    if ai_enhanced:
-                        # Update order with AI description
-                        order_to_update = Order.query.get(order_id)
-                        if order_to_update:
-                            order_to_update.ai_enhanced_description = ai_enhanced
-                            db.session.commit()
-                            print(f"AI description updated for order {order_to_update.order_number}")
-                except Exception as e:
-                    print(f"Error enhancing order description in background: {e}")
-
-        # Launch background thread
         if items_description and items_description.strip():
+            import threading
             bg_thread = threading.Thread(
                 target=enhance_in_background,
                 args=(order.id, items_description),
@@ -872,6 +883,17 @@ def restaurant_view_order(order_id):
         return redirect(url_for('restaurant_dashboard'))
 
     logs = DeliveryLog.query.filter_by(order_id=order.id).order_by(DeliveryLog.timestamp.desc()).all()
+
+    # If AI description is missing, generate it in background
+    if not order.ai_enhanced_description and order.items_description:
+        import threading
+        bg_thread = threading.Thread(
+            target=enhance_in_background,
+            args=(order.id, order.items_description),
+            daemon=True
+        )
+        bg_thread.start()
+        print(f"[AI] Started background generation for order {order.order_number}")
 
     return render_template('restaurant/view_order.html', order=order, logs=logs)
 
@@ -1375,6 +1397,17 @@ def courier_view_order(order_id):
 
     logs = DeliveryLog.query.filter_by(order_id=order.id).order_by(DeliveryLog.timestamp.desc()).all()
 
+    # If AI description is missing, generate it in background
+    if not order.ai_enhanced_description and order.items_description:
+        import threading
+        bg_thread = threading.Thread(
+            target=enhance_in_background,
+            args=(order.id, order.items_description),
+            daemon=True
+        )
+        bg_thread.start()
+        print(f"[AI] Started background generation for order {order.order_number}")
+
     return render_template('courier/view_order.html', order=order, logs=logs)
 
 
@@ -1840,6 +1873,18 @@ def seed_enhanced():
             "4x Pizza (2x Margherita, 2x Salami)",
             "Kebab box, extra omáčka",
             "2x Burger, 3x hranolky, 2x cola",
+            "Caesar salát s kuřecím, bez cibule, extra dresink",
+            "Pasta Carbonara, extra parmezan, česnekový chléb",
+            "2x Chicken wings (BBQ), 1x ranch omáčka",
+            "Vegetarian wrap, avokádo, extra zelenina",
+            "Pho bowl s hovězím, extra lime, sriracha",
+            "Fish & chips, tartar omáčka, citron",
+            "Pad Thai s krevetami, medium spicy",
+            "3x Tacos (beef, chicken, veggie)",
+            "Ramen s vepřovým, extra egg, nori",
+            "Falafel wrap, hummus, extra tahini",
+            "Chicken tikka masala, naan bread, 2x rice",
+            "Poke bowl s lososem, extra wasabi, soy sauce",
         ]
 
         print("\nGenerating enhanced order data...")
