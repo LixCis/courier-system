@@ -1,221 +1,236 @@
-# Courier System MVP
+# AI-Enhanced Courier Delivery System
 
-A functional web-based courier management system built with Python, Flask, and Tailwind CSS. Features role-based authentication, automatic order assignment, and comprehensive delivery tracking.
+Flask-based courier management system with AI-powered order processing and delivery verification. Student project demonstrating practical AI integration in web applications.
 
 ## Features
 
-### Role-Based Access Control
-- **Admin**: Full system oversight, user management, and order monitoring
-- **Restaurant**: Order creation and tracking
-- **Courier**: Delivery management and status updates
-
 ### Core Functionality
-- Secure authentication with Flask-Login and password hashing
-- Automatic order assignment algorithm (easily replaceable with AI)
-- Real-time order tracking and status updates
-- Comprehensive delivery logging for future AI analysis
-- Responsive UI with Tailwind CSS
+- **Role-Based Access** - Admin, Restaurant, and Courier dashboards
+- **Automatic Courier Assignment** - Intelligent assignment based on availability and location
+- **Real-time Order Tracking** - Live status updates and delivery monitoring
+- **Delivery Proof System** - Photo upload with GPS verification and image quality checks
 
-### Security
-- Password hashing with Werkzeug
-- Session management with Flask-Login
-- Role-based route protection
-- CSRF protection
+### AI-Powered Features
+- **Order Standardization** - Llama 3.2-3B automatically formats order descriptions
+- **Photo Analysis** - BLIP vision model verifies delivery photos and detects fraud
+- **AI Insights** - Personalized performance analytics for all user roles
+- **Background Processing** - Non-blocking AI with thread-safe model access
 
 ## Tech Stack
 
-- **Backend**: Python 3.x, Flask 3.0
-- **Database**: SQLAlchemy with SQLite
-- **Authentication**: Flask-Login
-- **Frontend**: Jinja2 templates, Tailwind CSS (CDN)
-- **Password Security**: Werkzeug
+- **Backend**: Python 3.8+, Flask 3.0, SQLAlchemy (SQLite)
+- **AI Models**: Llama 3.2-3B (GGUF), BLIP (vision-language)
+- **Frontend**: Jinja2, Tailwind CSS, JavaScript
 
-## Installation
+## Quick Start
 
 ### Prerequisites
-- Python 3.8 or higher
-- pip (Python package manager)
 
-### Setup Instructions
+1. **Python 3.8+** - [Download](https://python.org)
+2. **Visual C++ Build Tools** (Windows) - [Download](https://visualstudio.microsoft.com/downloads/#build-tools-for-visual-studio-2022)
+   - Select "Desktop development with C++" during installation
+3. **Llama Model** - Download and place in `models/` folder:
+   - Model: [Llama-3.2-3B-Instruct-Q6_K.gguf](https://huggingface.co/bartowski/Llama-3.2-3B-Instruct-GGUF/resolve/main/Llama-3.2-3B-Instruct-Q6_K.gguf) (~2.5GB)
+   - Rename to: `llama-3.2-3b.gguf`
+   - Location: `models/llama-3.2-3b.gguf`
 
-1. **Clone or navigate to the project directory**
-   ```bash
-   cd courier-system
-   ```
+### Installation
 
-2. **Create and activate virtual environment** (if not already done)
-   ```bash
-   # Windows
-   python -m venv .venv
-   .venv\Scripts\activate
+**Windows - One Click:**
+```bash
+run.bat
+```
 
-   # Linux/Mac
-   python3 -m venv .venv
-   source .venv/bin/activate
-   ```
+**Manual Install:**
+```bash
+# 1. Create & activate virtual environment
+python -m venv .venv
+.venv\Scripts\activate          # Windows
+source .venv/bin/activate       # Linux/Mac
 
-3. **Install dependencies**
-   ```bash
-   pip install -r requirements.txt
-   ```
+# 2. Install dependencies (~5-10 minutes first time)
+pip install -r requirements.txt
 
-4. **Initialize the database**
-   ```bash
-   flask init-db
-   ```
+# 3. Setup database
+flask init-db
+flask seed-db
 
-5. **Seed the database with demo data**
-   ```bash
-   flask seed-db
-   ```
+# 4. Run
+python app.py
+```
 
-6. **Run the application**
-   ```bash
-   python app.py
-   ```
-
-7. **Access the application**
-   Open your browser and navigate to: `http://localhost:5000`
+Access at: **http://localhost:5000**
 
 ## Demo Accounts
 
-After seeding the database, use these credentials to log in:
+| Role | Username | Password | Description |
+|------|----------|----------|-------------|
+| **Admin** | admin | admin123 | System administration |
+| **Restaurant** | pizza_palace | rest123 | Pizza Palace Ostrava |
+| **Restaurant** | burger_king | rest123 | Burger Kingdom Stodolní |
+| **Courier** | john_courier | courier123 | John Doe |
+| **Courier** | jane_courier | courier123 | Jane Smith |
+| **Courier** | mike_courier | courier123 | Mike Johnson |
 
-| Role | Username | Password |
-|------|----------|----------|
-| Admin | admin | admin123 |
-| Restaurant | pizza_palace | rest123 |
-| Restaurant | burger_king | rest123 |
-| Courier | john_courier | courier123 |
-| Courier | jane_courier | courier123 |
-| Courier | mike_courier | courier123 |
+## AI Features
+
+### 1. Order Description Standardization
+- **Model**: Llama 3.2-3B Instruct (3B parameters, Q6_K quantization)
+- **Example**: "dvě pizzy margherita jedna bez sýra" → "2x pizza Margherita (1x bez sýra)"
+- **Processing**: Background threads, non-blocking UI
+- **Performance**: 5-10s first load, <1s subsequent calls
+- **Size**: ~2.5GB (Q6_K offers excellent quality/size balance)
+
+### 2. Delivery Photo Analysis
+- **Model**: BLIP (Salesforce vision-language)
+- **Features**:
+  - Automatic photo captioning
+  - Legitimacy detection (0-100% confidence)
+  - Suspicious photo flagging
+  - GPS coordinate extraction from EXIF
+  - Image quality validation
+  - Device metadata extraction
+
+### 3. AI Insights & Analytics
+- **Personalized summaries** for couriers, restaurants, and admins
+- **24-hour caching** to reduce model calls
+- **Asynchronous loading** - pages render instantly, AI loads in background
+- **Performance metrics** and actionable recommendations
 
 ## Project Structure
 
 ```
 courier-system/
-├── app.py                          # Main Flask application
-├── config.py                       # Configuration settings
-├── models.py                       # Database models
-├── requirements.txt                # Python dependencies
-├── .env                           # Environment variables
+├── app.py                      # Main Flask application
+├── models.py                   # Database models (User, Order, etc.)
+├── config.py                   # Configuration
+├── requirements.txt            # Dependencies
+├── setup.py                    # Automated setup wizard
+├── run.bat                     # Windows quick start
+├── models/
+│   └── llama-3.2-3b.gguf      # Llama 3.2-3B Q6_K (~2.5GB) - not in Git
 ├── services/
-│   └── assignment_algorithm.py    # Modular order assignment logic
+│   ├── llm_service.py         # Thread-safe LLM wrapper
+│   ├── image_analyzer.py      # Vision AI + GPS/quality checks
+│   ├── ai_statistics.py       # AI insights generation
+│   └── assignment_algorithm.py # Courier assignment
 ├── templates/
-│   ├── base.html                  # Base template
-│   ├── login.html                 # Login page
-│   ├── admin/                     # Admin templates
-│   │   ├── dashboard.html
-│   │   ├── orders.html
-│   │   └── users.html
-│   ├── restaurant/                # Restaurant templates
-│   │   ├── dashboard.html
-│   │   ├── create_order.html
-│   │   └── view_order.html
-│   ├── courier/                   # Courier templates
-│   │   ├── dashboard.html
-│   │   └── view_order.html
-│   └── errors/                    # Error pages
-│       ├── 404.html
-│       └── 500.html
-└── README.md
+│   ├── admin/                 # Admin dashboard, analytics, user mgmt
+│   ├── restaurant/            # Order creation, tracking
+│   ├── courier/               # Delivery management
+│   └── components/            # Reusable UI components
+└── static/
+    ├── uploads/               # Delivery proof photos
+    └── js/                    # Frontend scripts
 ```
+
+## How It Works
+
+### Order Flow
+1. **Restaurant** creates order with customer details
+2. **System** assigns available courier automatically
+3. **Courier** picks up order → Auto-transitions to "in transit" after 3s
+4. **Courier** delivers and uploads proof photo
+5. **AI** analyzes photo for legitimacy
+
+### AI Processing
+- **Order descriptions**: Enhanced in background on order creation
+- **Photo analysis**: Triggered on delivery proof upload
+- **Insights**: Pre-generated on startup, cached for 24h
+
+### Thread Safety
+- Models use locks to prevent concurrent access
+- Background threads for non-blocking operations
+- Connection pool management to prevent timeouts
 
 ## Database Models
 
-### User
-- Stores user information with role differentiation (admin, restaurant, courier)
-- Password hashing for security
-- Courier-specific fields (availability, location)
+- **User** - Role-based auth (admin/restaurant/courier), location tracking
+- **Order** - Full delivery lifecycle with timestamps
+- **DeliveryLog** - Event logging for all order actions
+- **SavedCustomer** - Frequent delivery addresses
+- **AIStatisticsSummary** - Cached AI-generated insights
 
-### Order
-- Tracks delivery orders from creation to completion
-- Links restaurants and couriers
-- Comprehensive timestamp tracking for AI analysis
+## Performance Notes
 
-### DeliveryLog
-- Logs all order events and status changes
-- Captures timing data for route optimization
-- Flexible JSON metadata field for future AI features
-
-## Assignment Algorithm
-
-The system uses a modular assignment strategy pattern located in `services/assignment_algorithm.py`:
-
-### Current Strategies
-1. **FirstAvailableStrategy** (default): Assigns to the first available courier
-2. **LeastLoadedStrategy**: Assigns to courier with fewest active orders
-
-### Replacing with AI
-The modular design allows easy replacement:
-
-```python
-# In services/assignment_algorithm.py
-class AIBasedStrategy(AssignmentStrategy):
-    def assign_courier(self, order):
-        # Your AI logic here
-        # Consider: location, traffic, courier rating, etc.
-        return optimal_courier
-
-# Update the service
-assignment_service = AssignmentService(AIBasedStrategy())
-```
-
-## Order Status Flow
-
-1. **pending** → Order created, waiting for courier
-2. **assigned** → Courier automatically assigned
-3. **picked_up** → Courier picked up from restaurant
-4. **in_transit** → Order on the way to customer
-5. **delivered** → Order completed
-
-## Delivery Logging
-
-All order events are logged to the `delivery_logs` table with:
-- Event type and description
-- Timestamps (critical for AI route optimization)
-- User information (who performed the action)
-- Location data (for future GPS integration)
-- Flexible metadata field (JSON)
-
-## Future Enhancements
-
-### AI Integration Points
-1. **Route Optimization**: Use delivery logs to train ML models
-2. **Demand Prediction**: Analyze order patterns
-3. **Courier Assignment**: ML-based assignment considering traffic, location, ratings
-4. **Delivery Time Estimation**: Predict accurate delivery times
-
-### Suggested Features
-- Real-time GPS tracking
-- Push notifications
-- Customer rating system
-- Advanced analytics dashboard
-- Payment integration
-- Mobile app
+- **RAM**: ~4GB recommended (2.5GB model + overhead)
+- **Disk space**: ~3.5GB total (Llama 2.5GB + BLIP 990MB)
+- **First run**: Model loading ~5-10 seconds
+- **Subsequent**: <1 second per AI request
+- **Vision model**: Downloads automatically on first use (~990MB)
+- **CPU-only**: GPU acceleration not implemented
 
 ## Development
 
-### Adding New Features
+**Reset database:**
+```bash
+flask init-db && flask seed-db
+```
 
-1. **New Routes**: Add to `app.py`
-2. **Database Changes**: Update `models.py` and migrate
-3. **New Templates**: Add to appropriate folder in `templates/`
-4. **Assignment Logic**: Modify `services/assignment_algorithm.py`
+**Clear AI cache:**
+Admin panel → "Force Clear AI Cache" button
 
-### Running in Production
+**Add test orders:**
+Seed data includes 100+ historical orders for testing analytics
 
-1. Change `SECRET_KEY` in `.env` to a secure random string
-2. Use a production database (PostgreSQL recommended)
-3. Set `FLASK_ENV=production`
-4. Use a production WSGI server (Gunicorn, uWSGI)
-5. Set up HTTPS
-6. Configure proper session security
+## Troubleshooting
+
+**"Llama model not found"**
+- Download: [Llama-3.2-3B-Instruct-Q6_K.gguf](https://huggingface.co/bartowski/Llama-3.2-3B-Instruct-GGUF/resolve/main/Llama-3.2-3B-Instruct-Q6_K.gguf) (~2.5GB)
+- Rename to `llama-3.2-3b.gguf`
+- Place in `models/` folder
+
+**"llama-cpp-python compilation failed"**
+- Install Visual C++ Build Tools (Windows)
+- Install `build-essential` (Linux)
+
+**"Out of memory"**
+- Close other applications
+- AI models need ~4GB RAM
+
+**"Connection pool timeout"**
+- Restart application
+- Reduced by thread-safe model access
+
+## Known Limitations
+
+- **Language**: BLIP is English-focused (Czech analysis less accurate)
+- **Performance**: CPU-only (no GPU acceleration)
+- **Scalability**: SQLite database (use PostgreSQL for production)
+
+## Future Enhancements
+
+- GPU acceleration for faster inference
+- Real-time GPS tracking
+- Push notifications
+- Advanced route optimization ML
+- Mobile app
+- Multi-language vision support
+
+## Production Deployment
+
+**⚠ Not recommended for production** - This is an educational project.
+
+For production use:
+- Use PostgreSQL instead of SQLite
+- Implement GPU acceleration
+- Add rate limiting
+- Use production WSGI server (Gunicorn)
+- Configure HTTPS
+- Set strong SECRET_KEY
 
 ## License
 
-MIT License - Feel free to use for your projects
+MIT License - Free for educational and personal use
 
-## Support
+## Author
 
-For issues or questions, please create an issue in the repository.
+Student project - Semester work demonstrating AI integration in web applications
+
+## Acknowledgments
+
+- **Llama 3.2-3B Instruct** by Meta AI
+- **Q6_K Quantization** by @bartowski on HuggingFace
+- **BLIP** by Salesforce Research
+- **llama-cpp-python** for efficient CPU inference
+- **Transformers** by HuggingFace
