@@ -8,6 +8,12 @@ import secrets
 import os
 import sys
 from werkzeug.utils import secure_filename
+
+
+# Helper function for UTC datetime (naive, for DB compatibility)
+def utcnow():
+    """Get current UTC time as naive datetime (compatible with existing DB records)"""
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 from services.llm_service import enhance_order_description
 
 app = Flask(__name__)
@@ -88,7 +94,7 @@ if os.environ.get('WERKZEUG_RUN_MAIN') == 'true':
 @login_manager.user_loader
 def load_user(user_id):
     """Load user by ID for Flask-Login"""
-    return User.query.get(int(user_id))
+    return db.session.get(User, int(user_id))
 
 
 def role_required(*roles):
@@ -114,7 +120,7 @@ def enhance_in_background(order_id, description):
             ai_enhanced = enhance_order_description(description)
             if ai_enhanced:
                 # Update order with AI description
-                order_to_update = Order.query.get(order_id)
+                order_to_update = db.session.get(Order, order_id)
                 if order_to_update:
                     order_to_update.ai_enhanced_description = ai_enhanced
                     db.session.commit()
@@ -140,7 +146,7 @@ def auto_transition_order_statuses():
     for order in picked_up_orders:
         if order.picked_up_at:
             # Calculate time elapsed since pickup
-            time_elapsed = datetime.utcnow() - order.picked_up_at
+            time_elapsed = utcnow() - order.picked_up_at
             seconds = time_elapsed.total_seconds()
 
             print(f"[auto_transition] Order #{order.order_number}: picked_up_at={order.picked_up_at}, elapsed={seconds:.1f}s")
@@ -149,7 +155,7 @@ def auto_transition_order_statuses():
             if seconds >= 3:
                 old_status = order.status
                 order.status = 'in_transit'
-                order.in_transit_at = datetime.utcnow()
+                order.in_transit_at = utcnow()
 
                 print(f"[auto_transition] >> Transitioning Order #{order.order_number} from {old_status} to in_transit")
 
@@ -160,7 +166,7 @@ def auto_transition_order_statuses():
                     event_description=f'Status automatically changed from {old_status} to in_transit',
                     old_status=old_status,
                     new_status='in_transit',
-                    timestamp=datetime.utcnow()
+                    timestamp=utcnow()
                 )
                 db.session.add(log_entry)
                 transitions_made += 1
@@ -180,7 +186,7 @@ def auto_transition_order_statuses():
 
     for order in recent_transitions:
         if order.in_transit_at:
-            time_since_transition = datetime.utcnow() - order.in_transit_at
+            time_since_transition = utcnow() - order.in_transit_at
             if time_since_transition.total_seconds() <= 1:  # Reduced from 10 to 1 seconds to prevent reload loop
                 transitioned_order_ids.add(order.id)
 
@@ -748,12 +754,12 @@ def restaurant_create_order():
                     customer_name=customer_name,
                     customer_phone=customer_phone,
                     delivery_address=delivery_address,
-                    last_used_at=datetime.utcnow()
+                    last_used_at=utcnow()
                 )
                 db.session.add(saved_customer)
             else:
                 # Update last used time
-                existing.last_used_at = datetime.utcnow()
+                existing.last_used_at = utcnow()
 
         # Get GPS coordinates from map (required)
         pickup_address = request.form.get('pickup_address')
@@ -784,7 +790,7 @@ def restaurant_create_order():
             return render_template('restaurant/create_order.html', saved_customers=saved_customers)
 
         # Generate unique order number
-        order_number = f"ORD-{datetime.utcnow().strftime('%Y%m%d')}-{secrets.token_hex(4).upper()}"
+        order_number = f"ORD-{utcnow().strftime('%Y%m%d')}-{secrets.token_hex(4).upper()}"
 
         # Get items description (AI enhancement will happen in background)
         items_description = request.form.get('items_description')
@@ -821,7 +827,7 @@ def restaurant_create_order():
             new_status='pending',
             user_id=current_user.id,
             user_role='restaurant',
-            timestamp=datetime.utcnow()
+            timestamp=utcnow()
         )
         db.session.add(log_entry)
         db.session.commit()
@@ -1016,7 +1022,7 @@ def restaurant_cancel_order(order_id):
 
     # If courier was assigned, make them available again
     if order.courier_id and order.status == 'assigned':
-        courier = User.query.get(order.courier_id)
+        courier = db.session.get(User, order.courier_id)
         if courier:
             courier.is_available = True
 
@@ -1055,9 +1061,9 @@ def restaurant_update_order_status(order_id):
     order.status = new_status
 
     if new_status == 'picked_up' and not order.picked_up_at:
-        order.picked_up_at = datetime.utcnow()
+        order.picked_up_at = utcnow()
     elif new_status == 'in_transit' and not order.in_transit_at:
-        order.in_transit_at = datetime.utcnow()
+        order.in_transit_at = utcnow()
 
     # Log the status change
     log_entry = DeliveryLog(
@@ -1093,7 +1099,7 @@ def courier_dashboard():
     # Statistics
     all_orders = Order.query.filter_by(courier_id=current_user.id).all()
     completed_today = [o for o in all_orders if o.status == 'delivered' and
-                      o.delivered_at and o.delivered_at.date() == datetime.utcnow().date()]
+                      o.delivered_at and o.delivered_at.date() == utcnow().date()]
 
     return render_template('courier/dashboard.html',
                          active_orders=active_orders,
@@ -1234,7 +1240,7 @@ def courier_reject_order(order_id):
 
     order.rejected_by_couriers.append({
         'courier_id': current_user.id,
-        'rejected_at': datetime.utcnow().isoformat()
+        'rejected_at': utcnow().isoformat()
     })
 
     # Log the rejection
@@ -1246,7 +1252,7 @@ def courier_reject_order(order_id):
         new_status='pending',
         user_id=current_user.id,
         user_role='courier',
-        timestamp=datetime.utcnow()
+        timestamp=utcnow()
     )
     db.session.add(log_entry)
 
@@ -1352,11 +1358,11 @@ def courier_update_order_status(order_id):
     order.status = new_status
 
     if new_status == 'picked_up' and not order.picked_up_at:
-        order.picked_up_at = datetime.utcnow()
+        order.picked_up_at = utcnow()
     elif new_status == 'in_transit' and not order.in_transit_at:
-        order.in_transit_at = datetime.utcnow()
+        order.in_transit_at = utcnow()
     elif new_status == 'delivered' and not order.delivered_at:
-        order.delivered_at = datetime.utcnow()
+        order.delivered_at = utcnow()
 
         # Update courier performance stats
         current_user.successful_deliveries = (current_user.successful_deliveries or 0) + 1
@@ -1393,7 +1399,7 @@ def courier_update_order_status(order_id):
         new_status=new_status,
         user_id=current_user.id,
         user_role='courier',
-        timestamp=datetime.utcnow()
+        timestamp=utcnow()
     )
 
     db.session.add(log_entry)
@@ -1710,7 +1716,7 @@ def api_courier_dashboard_data():
     # Completed today
     all_orders = Order.query.filter_by(courier_id=current_user.id).all()
     completed_today = [o for o in all_orders if o.status == 'delivered' and
-                      o.delivered_at and o.delivered_at.date() == datetime.utcnow().date()]
+                      o.delivered_at and o.delivered_at.date() == utcnow().date()]
 
     from flask import jsonify
     return jsonify({
@@ -1972,7 +1978,7 @@ def seed_enhanced():
         print("\nGenerating enhanced order data...")
 
         orders_created = 0
-        now = datetime.utcnow()
+        now = utcnow()
 
         # Generate orders for last 14 days
         for days_ago in range(14):
