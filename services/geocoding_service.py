@@ -108,3 +108,40 @@ class GeocodingService:
 
         # Save to database
         db.session.commit()
+
+    def reverse_geocode(self, latitude, longitude):
+        """
+        Convert GPS coordinates to a human-readable address
+
+        Args:
+            latitude (float): Latitude coordinate
+            longitude (float): Longitude coordinate
+
+        Returns:
+            str: Address string or None if reverse geocoding fails
+
+        Example:
+            >>> service = GeocodingService()
+            >>> address = service.reverse_geocode(49.8209, 18.2625)
+            >>> print(address)
+            'Ostrava, Czech Republic'
+        """
+        try:
+            now = time.time()
+            elapsed = now - self.last_request
+            if elapsed < 1.0:
+                time.sleep(1.0 - elapsed)
+
+            self.last_request = time.time()
+
+            location = self.geolocator.reverse((latitude, longitude), timeout=5)
+
+            if location:
+                return location.address
+
+        except GeocoderTimedOut:
+            print(f"Reverse geocoding timeout for ({latitude}, {longitude})")
+        except Exception as e:
+            print(f"Reverse geocoding failed for ({latitude}, {longitude}): {e}")
+
+        return None

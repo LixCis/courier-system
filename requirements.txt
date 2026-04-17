@@ -18,3 +18,8 @@ APScheduler==3.10.4
 
 # Local LLM for order description standardization
 llama-cpp-python==0.2.90
+
+# WebSocket real-time communication
+flask-socketio==5.3.6
+gevent==25.9.1
+gevent-websocket==0.10.1

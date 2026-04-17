@@ -66,6 +66,13 @@ class OrderScheduler:
                     if success:
                         assigned_count += 1
                         print(f"✓ Order {order.order_number} assigned to {courier.full_name}")
+                        # Emit WebSocket event
+                        try:
+                            import app as app_module
+                            if hasattr(app_module, 'socketio_service'):
+                                app_module.socketio_service.emit_order_assigned(order)
+                        except Exception as e:
+                            print(f"[SocketIO] Error emitting order:assigned from scheduler: {e}")
                     else:
                         print(f"✗ Order {order.order_number}: {message}")
 

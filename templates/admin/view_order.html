@@ -28,7 +28,7 @@
         <div class="bg-white shadow sm:rounded-lg mt-6" id="ai-description-section">
             <div class="px-4 py-5 sm:p-6">
                 <h3 class="text-base font-semibold leading-6 text-gray-900 mb-4">
-                    AI Standardizovaný popis
+                    AI Enhanced Description
                     <span class="ml-2 inline-flex items-center rounded-md bg-blue-50 px-2 py-1 text-xs font-medium text-blue-700 ring-1 ring-inset ring-blue-700/10">
                         AI Enhanced
                     </span>
@@ -42,7 +42,7 @@
                                 <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
                                 <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                             </svg>
-                            <span class="text-sm text-gray-600">AI standardizuje popis objednávky...</span>
+                            <span class="text-sm text-gray-600">AI is standardizing the order description...</span>
                         </div>
                     </div>
                 </div>
@@ -53,11 +53,27 @@
                         <p class="text-sm text-gray-900 whitespace-pre-wrap">{{ order.ai_enhanced_description or '' }}</p>
                     </div>
                     <p class="mt-2 text-xs text-gray-500">
-                        Tento popis byl automaticky vylepšen pomocí AI pro standardizaci formátu.
+                        This description was automatically enhanced by AI for format standardization.
                     </p>
                 </div>
             </div>
         </div>
+
+        <!-- Delivery Map -->
+        {% if order.pickup_latitude and order.delivery_latitude %}
+        <div class="mt-6">
+            <h3 class="text-lg font-medium text-gray-900 mb-4">Delivery Map</h3>
+            <div class="bg-white rounded-lg shadow overflow-hidden">
+                <div id="order-map" style="height: 350px; width: 100%;"></div>
+                <div class="p-3 border-t flex flex-wrap gap-x-4 gap-y-1 text-sm">
+                    <span class="flex items-center font-medium">P</span><span class="text-xs text-gray-500 ml-1 mr-3">= Pickup</span>
+                    <span class="flex items-center font-medium">D</span><span class="text-xs text-gray-500 ml-1 mr-3">= Delivery</span>
+                    {% if order.courier_id %}<span class="flex items-center"><span class="w-3 h-3 bg-indigo-500 rounded-full mr-1"></span> Courier</span>{% endif %}
+                    <span class="flex items-center gap-1"><span class="inline-block w-6 border-t-2 border-rose-600"></span><span class="text-xs text-gray-500 ml-1">Route</span></span>
+                </div>
+            </div>
+        </div>
+        {% endif %}
 
         {# Display Delivery Proof if exists #}
         {% if order.delivery_proof_photo %}
@@ -82,34 +98,59 @@
     </div>
 </div>
 
-<script>
-// Poll for AI description if not yet available
-(function pollAIDescription() {
-    const aiLoading = document.getElementById('ai-loading');
-    const aiDescription = document.getElementById('ai-description');
-    const aiDescriptionText = aiDescription.querySelector('p');
+{% endblock %}
 
-    // Only poll if AI description is not ready yet
-    if (!aiLoading.classList.contains('hidden')) {
-        fetch('{{ url_for("api_get_ai_description", order_id=order.id) }}')
-            .then(response => response.json())
-            .then(data => {
-                if (data.is_ready && data.ai_enhanced_description) {
-                    // AI description is ready - update UI
-                    aiDescriptionText.textContent = data.ai_enhanced_description;
-                    aiLoading.classList.add('hidden');
-                    aiDescription.classList.remove('hidden');
-                } else {
-                    // Not ready yet - poll again after 2 seconds
-                    setTimeout(pollAIDescription, 2000);
-                }
-            })
-            .catch(error => {
-                console.error('Error polling AI description:', error);
-                // Retry after 3 seconds on error
-                setTimeout(pollAIDescription, 3000);
-            });
-    }
+{% block extra_js %}
+<script>
+(function() {
+    const ORDER_ID = {{ order.id }};
+    socket.emit('order:join', { order_id: ORDER_ID });
+
+    {% if order.pickup_latitude and order.delivery_latitude %}
+    const map = initMap('order-map');
+    const orderData = {
+        pickup_latitude: {{ order.pickup_latitude }},
+        pickup_longitude: {{ order.pickup_longitude }},
+        delivery_latitude: {{ order.delivery_latitude }},
+        delivery_longitude: {{ order.delivery_longitude }},
+        pickup_address: '{{ order.pickup_address|e }}',
+        delivery_address: '{{ order.delivery_address|e }}',
+        restaurant_name: '{{ order.restaurant_name|e }}',
+        customer_name: '{{ order.customer_name|e }}'
+    };
+    addOrderToMap(map, orderData, { routeColor: '#e11d48' });
+    {% if order.courier_user and order.courier_user.last_known_latitude %}
+    let courierMarker = L.marker(
+        [{{ order.courier_user.last_known_latitude }}, {{ order.courier_user.last_known_longitude }}],
+        { icon: ICONS.courierPosition }
+    ).addTo(map);
+    courierMarker.bindPopup('<b>{{ order.courier_user.full_name|e }}</b>');
+    {% endif %}
+    {% endif %}
+
+    socket.on('order:status_changed', (data) => {
+        if (data.order_id === ORDER_ID) { window.location.reload(); }
+    });
+
+    socket.on('courier:location_updated', (data) => {
+        {% if order.courier_id %}
+        if (data.courier_id === {{ order.courier_id }}) {
+            if (typeof courierMarker !== 'undefined') {
+                courierMarker.setLatLng([data.latitude, data.longitude]);
+            } else if (typeof map !== 'undefined') {
+                courierMarker = L.marker([data.latitude, data.longitude], { icon: ICONS.courierPosition }).addTo(map);
+            }
+        }
+        {% endif %}
+    });
+
+    socket.on('ai:description_ready', (data) => {
+        if (data.order_id === ORDER_ID) { window.location.reload(); }
+    });
+
+    window.addEventListener('beforeunload', () => {
+        socket.emit('order:leave', { order_id: ORDER_ID });
+    });
 })();
 </script>
 {% endblock %}

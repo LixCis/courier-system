@@ -116,6 +116,30 @@
             </div>
         </div>
 
+        <!-- Live Map -->
+        <div class="mt-8">
+            <h2 class="text-lg font-medium text-gray-900 mb-4">Live Map - Couriers &amp; Orders</h2>
+            <div class="bg-white rounded-lg shadow overflow-hidden">
+                <div id="admin-map" style="height: 450px; width: 100%;"></div>
+                <div class="p-3 border-t flex space-x-4 text-sm">
+                    <label class="flex items-center">
+                        <input type="checkbox" id="show-couriers" checked class="mr-2"> Couriers
+                    </label>
+                    <label class="flex items-center">
+                        <input type="checkbox" id="show-orders" checked class="mr-2"> Orders
+                    </label>
+                    <span class="text-gray-400">|</span>
+                    <span class="flex items-center"><span class="w-3 h-3 bg-green-500 rounded-full mr-1"></span> Available</span>
+                    <span class="flex items-center"><span class="w-3 h-3 bg-yellow-500 rounded-full mr-1"></span> On the way</span>
+                    <span class="flex items-center"><span class="w-3 h-3 bg-gray-400 rounded-full mr-1"></span> Unavailable</span>
+                    <span class="text-gray-400">|</span>
+                    <span class="flex items-center font-medium">P</span><span class="text-xs text-gray-500 ml-1 mr-3">= Pickup</span>
+                    <span class="flex items-center font-medium">D</span><span class="text-xs text-gray-500 ml-1 mr-3">= Delivery</span>
+                    <span class="text-xs text-gray-500 italic">Routes are color-coded per order</span>
+                </div>
+            </div>
+        </div>
+
         <!-- Recent Orders -->
         <div class="mt-8">
             <div class="sm:flex sm:items-center sm:justify-between mb-4">
@@ -272,152 +296,108 @@
 
 {% block extra_js %}
 <script>
-// Admin Dashboard Auto-Refresh
 (function() {
-    console.log('[admin-dashboard] Initializing polling...');
+    // --- Map Setup ---
+    const map = initMap('admin-map');
+    const courierMarkers = {};  // courier_id -> L.Marker
+    const orderLayers = {};     // order_id -> { pickupMarker, deliveryMarker, route }
 
-    // Initialize metrics from DOM before polling starts
-    initializeLastDataFromDOM();
-
-    // Poll dashboard data every 1 second (orders) and 5 seconds (stats)
-    let statsUpdateCounter = 0;
-
-    window.autoRefresh.start('admin-dashboard', '/api/admin/dashboard-data', (data, hasChanged) => {
-        console.log(`[admin-dashboard] Callback: hasChanged=${hasChanged}`);
-
-        if (!hasChanged) {
-            console.log('[admin-dashboard] No change detected');
-            return;
+    // Load initial courier positions
+    const couriers = {{ couriers_json | safe }};
+    couriers.forEach(c => {
+        if (c.latitude && c.longitude) {
+            const marker = L.marker([c.latitude, c.longitude], {
+                icon: getCourierIcon(c)
+            }).addTo(map);
+            marker.bindPopup(`<b>${c.name}</b><br>${c.vehicle_type}<br>Active orders: ${c.active_orders_count}`);
+            courierMarkers[c.id] = marker;
         }
+    });
 
-        console.log('[admin-dashboard] Data changed! Updating UI...');
+    // Distinct route colors for each order
+    const ROUTE_COLORS = ['#e11d48','#7c3aed','#0891b2','#059669','#d97706','#9333ea','#0284c7','#b45309','#be123c','#1d4ed8'];
 
-        // Update statistics every 5th poll (= 5 seconds)
-        statsUpdateCounter++;
-        if (statsUpdateCounter >= 5) {
-            console.log('[admin-dashboard] Updating statistics (5th poll)');
-            statsUpdateCounter = 0;
-            updateStatistics(data.statistics);
+    // Load initial active orders
+    const orders = {{ active_orders_json | safe }};
+    orders.forEach(async (order, index) => {
+        const color = ROUTE_COLORS[index % ROUTE_COLORS.length];
+        orderLayers[order.id] = await addOrderToMap(map, order, { routeColor: color });
+        orderLayers[order.id]._color = color;
+    });
+
+    // Fit all markers
+    const allMarkers = Object.values(courierMarkers);
+    if (allMarkers.length > 0) fitMapToMarkers(map, allMarkers);
+
+    // Filter checkboxes
+    document.getElementById('show-couriers').addEventListener('change', function() {
+        Object.values(courierMarkers).forEach(m => {
+            if (this.checked) m.addTo(map); else map.removeLayer(m);
+        });
+    });
+    document.getElementById('show-orders').addEventListener('change', function() {
+        Object.values(orderLayers).forEach(layers => {
+            ['pickupMarker', 'deliveryMarker', 'route'].forEach(key => {
+                if (layers[key]) {
+                    if (this.checked) layers[key].addTo(map); else map.removeLayer(layers[key]);
+                }
+            });
+        });
+    });
+
+    // --- SocketIO Events ---
+    socket.on('order:created', (data) => {
+        const totalEl = document.querySelector('[data-metric="total_orders"]');
+        if (totalEl) totalEl.textContent = parseInt(totalEl.textContent) + 1;
+        const pendingEl = document.querySelector('[data-metric="pending_orders"]');
+        if (pendingEl) pendingEl.textContent = parseInt(pendingEl.textContent) + 1;
+
+        if (data.pickup_latitude && data.delivery_latitude) {
+            const nextIndex = Object.keys(orderLayers).length;
+            const color = ROUTE_COLORS[nextIndex % ROUTE_COLORS.length];
+            addOrderToMap(map, data, { routeColor: color }).then(layers => {
+                orderLayers[data.order_id] = layers;
+                orderLayers[data.order_id]._color = color;
+            });
         }
+    });
 
-        // Update orders and logs every poll (= 1 second)
-        console.log('[admin-dashboard] Updating orders and logs lists');
-        updateOrdersList(data.recent_orders);
-        updateLogsList(data.recent_logs);
-    }, 1000);
-
-    function initializeLastDataFromDOM() {
-        // Read initial statistics from DOM
-        const statistics = {};
-        document.querySelectorAll('[data-metric]').forEach(el => {
-            const key = el.getAttribute('data-metric');
-            statistics[key] = parseInt(el.textContent) || 0;
-        });
-
-        // Read actual order data from DOM
-        const orderItems = document.querySelectorAll('#recent-orders-list li:not(.text-center)');
-        const orders = Array.from(orderItems).map(li => {
-            const orderNumber = li.querySelector('.text-indigo-600')?.textContent || '';
-            const status = li.querySelector('.inline-flex')?.textContent.trim() || '';
-            return {
-                order_number: orderNumber,
-                status: status
-            };
-        });
-
-        // Read actual log data from DOM
-        const logItems = document.querySelectorAll('#recent-logs-list li:not(.text-center)');
-        const logs = Array.from(logItems).map(li => {
-            const description = li.querySelector('.text-gray-900')?.textContent || '';
-            return {
-                event_description: description
-            };
-        });
-
-        // Build initial data structure matching API response
-        const initialData = {
-            statistics: statistics,
-            recent_orders: orders,
-            recent_logs: logs
-        };
-
-        // Store as JSON string (same format as autoRefresh stores it)
-        window.autoRefresh.lastData['admin-dashboard'] = JSON.stringify(initialData);
-        console.log('[admin-dashboard] Initialized lastData from DOM:', initialData);
-    }
-
-    function updateStatistics(stats) {
-        // Update each metric
-        Object.keys(stats).forEach(key => {
-            const element = document.querySelector(`[data-metric="${key}"]`);
-            if (element && element.textContent != stats[key]) {
-                element.textContent = stats[key];
-                window.autoRefresh.highlightElement(element.parentElement);
+    socket.on('order:status_changed', (data) => {
+        if (data.new_status === 'delivered' || data.new_status === 'cancelled') {
+            const layers = orderLayers[data.order_id];
+            if (layers) {
+                ['pickupMarker', 'deliveryMarker', 'route'].forEach(key => {
+                    if (layers[key]) map.removeLayer(layers[key]);
+                });
+                delete orderLayers[data.order_id];
             }
-        });
-    }
-
-    function updateOrdersList(orders) {
-        const list = document.getElementById('orders-list');
-        if (!list) return;
-
-        const html = orders.map(order => `
-            <li data-order-id="${order.id}">
-                <a href="/admin/order/${order.id}" class="block hover:bg-gray-50 transition">
-                    <div class="px-4 py-4 sm:px-6">
-                        <div class="flex items-center justify-between">
-                            <div class="flex-1">
-                                <p class="text-sm font-medium text-indigo-600">${order.order_number}</p>
-                                <p class="text-sm text-gray-500">${order.restaurant_name} → ${order.customer_name}</p>
-                            </div>
-                            <div class="ml-2 flex-shrink-0">
-                                ${createStatusBadge(order.status)}
-                            </div>
-                        </div>
-                        <div class="mt-2 sm:flex sm:justify-between">
-                            <div class="sm:flex">
-                                <p class="flex items-center text-sm text-gray-500">
-                                    ${order.courier_name ? `Courier: ${order.courier_name}` : 'No courier assigned'}
-                                </p>
-                            </div>
-                            <div class="mt-2 flex items-center text-sm text-gray-500 sm:mt-0">
-                                <p>${formatDateTime(order.created_at)}</p>
-                            </div>
-                        </div>
-                    </div>
-                </a>
-            </li>
-        `).join('');
-
-        if (list.innerHTML !== html) {
-            list.innerHTML = html || '<li class="px-4 py-4 sm:px-6 text-center text-gray-500">No orders yet</li>';
         }
-    }
+    });
 
-    function updateLogsList(logs) {
-        const list = document.getElementById('recent-logs-list');
-        if (!list) return;
-
-        const html = logs.map(log => `
-            <li class="px-4 py-3 sm:px-6">
-                <div class="flex items-center justify-between">
-                    <div class="flex-1">
-                        <p class="text-sm text-gray-900">${log.event_description}</p>
-                        <p class="text-xs text-gray-500 mt-1">Order #${log.order_id} - ${log.event_type}</p>
-                    </div>
-                    <div class="ml-2 flex-shrink-0 text-xs text-gray-500">
-                        ${formatRelativeTime(log.timestamp)}
-                    </div>
-                </div>
-            </li>
-        `).join('');
-
-        if (list.innerHTML !== html) {
-            list.innerHTML = html || '<li class="px-4 py-3 sm:px-6 text-center text-gray-500 text-sm">No activity yet</li>';
+    socket.on('courier:location_updated', (data) => {
+        if (courierMarkers[data.courier_id]) {
+            courierMarkers[data.courier_id].setLatLng([data.latitude, data.longitude]);
+        } else if (data.latitude && data.longitude) {
+            const marker = L.marker([data.latitude, data.longitude], {
+                icon: ICONS.courierBusy
+            }).addTo(map);
+            marker.bindPopup(`<b>${data.courier_name}</b>`);
+            courierMarkers[data.courier_id] = marker;
         }
-    }
+    });
 
-    console.log('Admin dashboard polling started');
+    socket.on('courier:availability_changed', (data) => {
+        if (courierMarkers[data.courier_id]) {
+            courierMarkers[data.courier_id].setIcon(
+                data.is_available ? ICONS.courierAvailable : ICONS.courierUnavailable
+            );
+        }
+        const availEl = document.querySelector('[data-metric="available_couriers"]');
+        if (availEl) {
+            const current = parseInt(availEl.textContent);
+            availEl.textContent = data.is_available ? current + 1 : Math.max(0, current - 1);
+        }
+    });
 })();
 </script>
 {% endblock %}

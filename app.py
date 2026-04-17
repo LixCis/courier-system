@@ -1,13 +1,24 @@
+import sys
+try:
+    sys.stdout.reconfigure(encoding='utf-8')
+    sys.stderr.reconfigure(encoding='utf-8')
+except AttributeError:
+    pass
+
+from gevent import monkey
+monkey.patch_all()
+
 from flask import Flask, render_template, redirect, url_for, flash, request, jsonify
 from flask_login import LoginManager, login_user, logout_user, login_required, current_user
 from functools import wraps
 from config import Config
-from models import db, User, Order, DeliveryLog, SavedCustomer
+from models import db, User, Order, DeliveryLog, SavedCustomer, Notification
 from datetime import datetime, timezone
 import secrets
 import os
 import sys
 from werkzeug.utils import secure_filename
+from flask_socketio import SocketIO, emit, join_room, leave_room
 
 
 # Helper function for UTC datetime (naive, for DB compatibility)
@@ -31,6 +42,10 @@ def allowed_file(filename):
 
 # Initialize extensions
 db.init_app(app)
+
+# Initialize SocketIO
+socketio = SocketIO(app, manage_session=False, async_mode='gevent', cors_allowed_origins="*")
+
 login_manager = LoginManager()
 login_manager.init_app(app)
 login_manager.login_view = 'login'
@@ -40,14 +55,26 @@ login_manager.login_message = 'Please log in to access this page.'
 from services.order_scheduler import init_scheduler
 scheduler = init_scheduler(app)
 
+# Initialize SocketIO service
+from services.socketio_service import SocketIOService
+socketio_service = SocketIOService(socketio)
+
 
 # Pre-generate AI insights on startup
 def pregenerate_ai_insights():
     """Pre-generate AI insights for all users on startup (runs in background)"""
     import time
-    import threading
 
     time.sleep(0.5)  # Wait 500ms for app to fully initialize
+
+    # Load the LLM model in background so the web server starts instantly
+    from services.llm_service import llm_service
+    print("\n[AI] Pre-loading LLM model in background...")
+    if llm_service.is_available():
+        print("[AI] ✓ LLM model ready")
+    else:
+        print("[AI] ✗ LLM model not available, AI features will be disabled")
+        return
 
     with app.app_context():
         from services.ai_statistics import get_or_generate_ai_summary
@@ -75,20 +102,11 @@ def pregenerate_ai_insights():
         except Exception as e:
             print(f"[AI] Error pre-generating insights: {e}\n")
 
-# Start AI pre-generation in background thread (only in main process, not reloader)
-import threading
+# Start AI pre-generation in background (only in main process, not reloader)
+# Both the LLM model load and insights generation now happen inside the background task,
+# so the Flask server becomes reachable immediately instead of waiting for the ~2.5 GB model.
 if os.environ.get('WERKZEUG_RUN_MAIN') == 'true':
-    # Pre-load LLM model BEFORE starting background threads
-    # This prevents race condition where multiple threads try to load model simultaneously
-    from services.llm_service import llm_service
-    print("\n[AI] Pre-loading LLM model before background tasks...")
-    if llm_service.is_available():
-        print("[AI] ✓ LLM model ready\n")
-    else:
-        print("[AI] ✗ LLM model not available, AI features will be disabled\n")
-
-    ai_thread = threading.Thread(target=pregenerate_ai_insights, daemon=True)
-    ai_thread.start()
+    socketio.start_background_task(pregenerate_ai_insights)
 
 
 @login_manager.user_loader
@@ -125,8 +143,35 @@ def enhance_in_background(order_id, description):
                     order_to_update.ai_enhanced_description = ai_enhanced
                     db.session.commit()
                     print(f"[AI] Description updated for order {order_to_update.order_number}")
+                    socketio_service.emit_ai_description_ready(order_to_update)
         except Exception as e:
             print(f"[AI] Error enhancing order description in background: {e}")
+
+
+def transition_to_in_transit_background(order_id):
+    """Background thread: wait 3s then transition order from picked_up to in_transit."""
+    import time
+    time.sleep(3)
+    with app.app_context():
+        try:
+            order = db.session.get(Order, order_id)
+            if order and order.status == 'picked_up':
+                order.status = 'in_transit'
+                order.in_transit_at = utcnow()
+                log_entry = DeliveryLog(
+                    order_id=order.id,
+                    event_type='status_change',
+                    event_description='Status automatically changed from picked_up to in_transit',
+                    old_status='picked_up',
+                    new_status='in_transit',
+                    timestamp=utcnow()
+                )
+                db.session.add(log_entry)
+                db.session.commit()
+                print(f"[auto_transition] Order #{order.order_number} transitioned to in_transit via background thread")
+                socketio_service.emit_order_status_changed(order, 'picked_up', 'in_transit')
+        except Exception as e:
+            print(f"[auto_transition] Background thread error for order {order_id}: {e}")
 
 
 def auto_transition_order_statuses():
@@ -172,10 +217,16 @@ def auto_transition_order_statuses():
                 transitions_made += 1
                 transitioned_order_ids.add(order.id)
 
-    # Commit all changes
+    # Commit all changes and emit SocketIO events
     if transitions_made > 0:
         db.session.commit()
         print(f"[auto_transition] Committed {transitions_made} transitions")
+        for order in picked_up_orders:
+            if order.id in transitioned_order_ids:
+                try:
+                    socketio_service.emit_order_status_changed(order, 'picked_up', 'in_transit')
+                except Exception as e:
+                    print(f"[auto_transition] SocketIO emit error for order {order.id}: {e}")
 
     # Also include orders that transitioned recently (within last 1 seconds)
     # This catches orders that transitioned between button click and page load
@@ -191,6 +242,113 @@ def auto_transition_order_statuses():
                 transitioned_order_ids.add(order.id)
 
     return transitioned_order_ids
+
+
+# ==================== WebSocket Handlers ====================
+
+@socketio.on('connect')
+def handle_connect():
+    """Handle WebSocket connection - join role-based rooms."""
+    if not current_user.is_authenticated:
+        return False  # Reject connection
+
+    # Join role-based room
+    if current_user.role == 'admin':
+        join_room('admin')
+        join_room(f'admin_{current_user.id}')  # personal room for notifications
+    else:
+        join_room(f'{current_user.role}_{current_user.id}')
+
+    # Send initial notification data
+    unread_count = Notification.query.filter_by(user_id=current_user.id, is_read=False).count()
+    recent = Notification.query.filter_by(user_id=current_user.id)\
+        .order_by(Notification.created_at.desc()).limit(20).all()
+
+    emit('dashboard:data', {
+        'unread_notifications_count': unread_count,
+        'recent_notifications': [n.to_dict() for n in recent]
+    })
+
+
+@socketio.on('disconnect')
+def handle_disconnect():
+    """Handle WebSocket disconnection."""
+    pass  # Rooms are automatically cleaned up
+
+
+@socketio.on('order:join')
+def handle_order_join(data):
+    """Join an order-specific room for real-time updates."""
+    if not current_user.is_authenticated:
+        return
+
+    order_id = data.get('order_id')
+    if not order_id:
+        return
+
+    # Verify permission
+    order = db.session.get(Order, order_id)
+    if not order:
+        return
+
+    if current_user.role == 'admin':
+        join_room(f'order_{order_id}')
+    elif current_user.role == 'restaurant' and order.restaurant_id == current_user.id:
+        join_room(f'order_{order_id}')
+    elif current_user.role == 'courier' and order.courier_id == current_user.id:
+        join_room(f'order_{order_id}')
+
+
+@socketio.on('order:leave')
+def handle_order_leave(data):
+    """Leave an order-specific room."""
+    order_id = data.get('order_id')
+    if order_id:
+        leave_room(f'order_{order_id}')
+
+
+@socketio.on('notification:mark_read')
+def handle_mark_read(data):
+    """Mark a single notification as read."""
+    if not current_user.is_authenticated:
+        return
+
+    notification_id = data.get('notification_id')
+    notification = db.session.get(Notification, notification_id)
+    if notification and notification.user_id == current_user.id:
+        notification.is_read = True
+        db.session.commit()
+
+
+@socketio.on('notification:mark_all_read')
+def handle_mark_all_read(data):
+    """Mark all notifications as read for the current user."""
+    if not current_user.is_authenticated:
+        return
+
+    Notification.query.filter_by(user_id=current_user.id, is_read=False)\
+        .update({'is_read': True})
+    db.session.commit()
+
+
+@socketio.on('courier:update_location')
+def handle_courier_location(data):
+    """Handle courier location update via WebSocket."""
+    if not current_user.is_authenticated or current_user.role != 'courier':
+        return
+
+    latitude = data.get('latitude')
+    longitude = data.get('longitude')
+    location_description = data.get('location_description', '')
+
+    if latitude is not None and longitude is not None:
+        current_user.last_known_latitude = float(latitude)
+        current_user.last_known_longitude = float(longitude)
+        if location_description:
+            current_user.current_location = location_description
+        db.session.commit()
+
+        socketio_service.emit_courier_location(current_user)
 
 
 # ==================== Authentication Routes ====================
@@ -289,6 +447,40 @@ def admin_dashboard():
         page=logs_page, per_page=15, error_out=False
     )
 
+    import json
+
+    # Courier data for map
+    all_couriers = User.query.filter_by(role='courier', is_active=True).all()
+    couriers_json = json.dumps([{
+        'id': c.id,
+        'name': c.full_name,
+        'latitude': c.last_known_latitude,
+        'longitude': c.last_known_longitude,
+        'is_available': c.is_available,
+        'vehicle_type': c.vehicle_type or 'bike',
+        'active_orders_count': Order.query.filter_by(courier_id=c.id).filter(
+            Order.status.in_(['assigned', 'picked_up', 'in_transit'])
+        ).count()
+    } for c in all_couriers])
+
+    # Active orders for map
+    active_orders_list = Order.query.filter(
+        Order.status.in_(['pending', 'assigned', 'picked_up', 'in_transit'])
+    ).all()
+    active_orders_json = json.dumps([{
+        'id': o.id,
+        'order_number': o.order_number,
+        'restaurant_name': o.restaurant_name,
+        'customer_name': o.customer_name,
+        'status': o.status,
+        'pickup_address': o.pickup_address,
+        'delivery_address': o.delivery_address,
+        'pickup_latitude': o.pickup_latitude,
+        'pickup_longitude': o.pickup_longitude,
+        'delivery_latitude': o.delivery_latitude,
+        'delivery_longitude': o.delivery_longitude
+    } for o in active_orders_list])
+
     return render_template('admin/dashboard.html',
                          total_orders=total_orders,
                          pending_orders=pending_orders,
@@ -298,7 +490,9 @@ def admin_dashboard():
                          available_couriers=available_couriers,
                          total_restaurants=total_restaurants,
                          orders_pagination=orders_pagination,
-                         logs_pagination=logs_pagination)
+                         logs_pagination=logs_pagination,
+                         couriers_json=couriers_json,
+                         active_orders_json=active_orders_json)
 
 
 @app.route('/admin/orders')
@@ -372,13 +566,7 @@ def admin_view_order(order_id):
 
     # If AI description is missing, generate it in background
     if not order.ai_enhanced_description and order.items_description:
-        import threading
-        bg_thread = threading.Thread(
-            target=enhance_in_background,
-            args=(order.id, order.items_description),
-            daemon=True
-        )
-        bg_thread.start()
+        socketio.start_background_task(enhance_in_background, order.id, order.items_description)
         print(f"[AI] Started background generation for order {order.order_number}")
 
     return render_template('admin/view_order.html', order=order, logs=logs)
@@ -558,6 +746,7 @@ def admin_toggle_courier_availability(courier_id):
 
     courier.is_available = not courier.is_available
     db.session.commit()
+    socketio_service.emit_courier_availability(courier)
 
     status = 'available' if courier.is_available else 'unavailable'
     flash(f'{courier.full_name} is now {status}.', 'success')
@@ -611,13 +800,11 @@ def api_admin_ai_insights():
 def admin_force_refresh_ai_cache():
     """Force refresh all AI summary cache (for testing)"""
     from services.ai_statistics import clear_all_ai_cache
-    import threading
 
     deleted_count = clear_all_ai_cache()
 
     # Start background regeneration
-    regen_thread = threading.Thread(target=pregenerate_ai_insights, daemon=True)
-    regen_thread.start()
+    socketio.start_background_task(pregenerate_ai_insights)
 
     flash(f'AI cache cleared successfully! {deleted_count} entries removed. New summaries are being generated in the background.', 'success')
     return redirect(request.referrer or url_for('admin_analytics'))
@@ -832,20 +1019,18 @@ def restaurant_create_order():
         db.session.add(log_entry)
         db.session.commit()
 
+        # Emit order created event
+        socketio_service.emit_order_created(order)
+
         # Start AI description enhancement in background (non-blocking)
         if items_description and items_description.strip():
-            import threading
-            bg_thread = threading.Thread(
-                target=enhance_in_background,
-                args=(order.id, items_description),
-                daemon=True
-            )
-            bg_thread.start()
+            socketio.start_background_task(enhance_in_background, order.id, items_description)
 
         # Auto-assign to courier
         success, message, courier = default_assignment_service.auto_assign_order(order)
 
         if success:
+            socketio_service.emit_order_assigned(order)
             # Build detailed success message with estimated times
             msg = f'Order {order.order_number} created and assigned to {courier.full_name}!'
 
@@ -943,13 +1128,7 @@ def restaurant_view_order(order_id):
 
     # If AI description is missing, generate it in background
     if not order.ai_enhanced_description and order.items_description:
-        import threading
-        bg_thread = threading.Thread(
-            target=enhance_in_background,
-            args=(order.id, order.items_description),
-            daemon=True
-        )
-        bg_thread.start()
+        socketio.start_background_task(enhance_in_background, order.id, order.items_description)
         print(f"[AI] Started background generation for order {order.order_number}")
 
     return render_template('restaurant/view_order.html', order=order, logs=logs)
@@ -1038,6 +1217,7 @@ def restaurant_cancel_order(order_id):
     )
     db.session.add(log_entry)
     db.session.commit()
+    socketio_service.emit_order_cancelled(order)
 
     flash(f'Order {order.order_number} has been cancelled.', 'success')
     return redirect(url_for('restaurant_dashboard'))
@@ -1077,6 +1257,7 @@ def restaurant_update_order_status(order_id):
     )
     db.session.add(log_entry)
     db.session.commit()
+    socketio_service.emit_order_status_changed(order, old_status, new_status)
 
     flash(f'Order status updated to {new_status}.', 'success')
     return redirect(url_for('restaurant_view_order', order_id=order.id))
@@ -1101,10 +1282,26 @@ def courier_dashboard():
     completed_today = [o for o in all_orders if o.status == 'delivered' and
                       o.delivered_at and o.delivered_at.date() == utcnow().date()]
 
+    import json
+    active_orders_json = json.dumps([{
+        'id': o.id,
+        'order_number': o.order_number,
+        'restaurant_name': o.restaurant_name,
+        'customer_name': o.customer_name,
+        'pickup_address': o.pickup_address,
+        'delivery_address': o.delivery_address,
+        'pickup_latitude': o.pickup_latitude,
+        'pickup_longitude': o.pickup_longitude,
+        'delivery_latitude': o.delivery_latitude,
+        'delivery_longitude': o.delivery_longitude,
+        'status': o.status
+    } for o in active_orders])
+
     return render_template('courier/dashboard.html',
                          active_orders=active_orders,
                          completed_orders=completed_today,
-                         is_available=current_user.is_available)
+                         is_available=current_user.is_available,
+                         active_orders_json=active_orders_json)
 
 
 @app.route('/courier/toggle-availability')
@@ -1122,6 +1319,7 @@ def courier_toggle_availability():
         current_user.pending_unavailable = True
         current_user.is_available = False
         db.session.commit()
+        socketio_service.emit_courier_availability(current_user)
 
         flash(f'You have {active_orders} active order(s). You are now unavailable for new orders and will remain unavailable after completing all deliveries.', 'info')
         return redirect(url_for('courier_dashboard'))
@@ -1130,6 +1328,7 @@ def courier_toggle_availability():
     current_user.is_available = not current_user.is_available
     current_user.pending_unavailable = False  # Clear flag if manually toggling back to available
     db.session.commit()
+    socketio_service.emit_courier_availability(current_user)
 
     status = 'available' if current_user.is_available else 'unavailable'
     flash(f'You are now {status} for new orders.', 'success')
@@ -1149,6 +1348,7 @@ def courier_update_location():
         current_user.last_known_latitude = latitude
         current_user.last_known_longitude = longitude
         db.session.commit()
+        socketio_service.emit_courier_location(current_user)
 
         flash('Your location has been updated successfully!', 'success')
         return redirect(url_for('courier_dashboard'))
@@ -1266,6 +1466,7 @@ def courier_reject_order(order_id):
     order.estimated_total_time = None
 
     db.session.commit()
+    socketio_service.emit_order_rejected(order, current_user.id, current_user.full_name)
 
     flash('Order rejected. It will be reassigned to another courier.', 'info')
 
@@ -1274,6 +1475,7 @@ def courier_reject_order(order_id):
     success, message, new_courier = default_assignment_service.auto_assign_order(order, exclude_courier_id=old_courier)
 
     if success:
+        socketio_service.emit_order_assigned(order)
         flash(f'Order automatically reassigned to {new_courier.full_name}.', 'success')
     else:
         flash(f'Warning: {message}', 'warning')
@@ -1404,6 +1606,13 @@ def courier_update_order_status(order_id):
 
     db.session.add(log_entry)
     db.session.commit()
+    socketio_service.emit_order_status_changed(order, old_status, new_status)
+    if new_status == 'delivered':
+        socketio_service.emit_courier_availability(current_user)
+
+    # Schedule automatic picked_up → in_transit transition in background
+    if new_status == 'picked_up':
+        socketio.start_background_task(transition_to_in_transit_background, order.id)
 
     flash(f'Order status updated to {new_status}.', 'success')
     return redirect(url_for('courier_view_order', order_id=order.id))
@@ -1487,16 +1696,26 @@ def courier_view_order(order_id):
 
     # If AI description is missing, generate it in background
     if not order.ai_enhanced_description and order.items_description:
-        import threading
-        bg_thread = threading.Thread(
-            target=enhance_in_background,
-            args=(order.id, order.items_description),
-            daemon=True
-        )
-        bg_thread.start()
+        socketio.start_background_task(enhance_in_background, order.id, order.items_description)
         print(f"[AI] Started background generation for order {order.order_number}")
 
     return render_template('courier/view_order.html', order=order, logs=logs)
+
+
+# ==================== Notifications ====================
+
+@app.route('/notifications')
+@login_required
+def notifications_page():
+    """View all notifications with pagination."""
+    page = request.args.get('page', 1, type=int)
+    per_page = 20
+
+    pagination = Notification.query.filter_by(user_id=current_user.id)\
+        .order_by(Notification.created_at.desc())\
+        .paginate(page=page, per_page=per_page, error_out=False)
+
+    return render_template('notifications.html', pagination=pagination)
 
 
 # ==================== Error Handlers ====================
@@ -1511,303 +1730,6 @@ def internal_error(error):
     db.session.rollback()
     return render_template('errors/500.html'), 500
 
-
-# ==================== API Routes (for AJAX polling) ====================
-
-@app.route('/api/admin/dashboard-data')
-@role_required('admin')
-def api_admin_dashboard_data():
-    """API endpoint for admin dashboard real-time data"""
-    auto_transition_order_statuses()
-
-    # Statistics
-    total_orders = Order.query.count()
-    pending_orders = Order.query.filter_by(status='pending').count()
-    active_orders = Order.query.filter(Order.status.in_(['assigned', 'picked_up', 'in_transit'])).count()
-    completed_orders = Order.query.filter_by(status='delivered').count()
-    total_couriers = User.query.filter_by(role='courier').count()
-    available_couriers = User.query.filter_by(role='courier', is_available=True).count()
-    total_restaurants = User.query.filter_by(role='restaurant').count()
-
-    # Recent orders (last 10)
-    recent_orders = Order.query.order_by(Order.created_at.desc()).limit(10).all()
-
-    # Recent logs (last 15)
-    recent_logs = DeliveryLog.query.order_by(DeliveryLog.timestamp.desc()).limit(15).all()
-
-    from flask import jsonify
-    return jsonify({
-        'statistics': {
-            'total_orders': total_orders,
-            'pending_orders': pending_orders,
-            'active_orders': active_orders,
-            'completed_orders': completed_orders,
-            'total_couriers': total_couriers,
-            'available_couriers': available_couriers,
-            'total_restaurants': total_restaurants
-        },
-        'recent_orders': [{
-            'id': order.id,
-            'order_number': order.order_number,
-            'restaurant_name': order.restaurant_name,
-            'customer_name': order.customer_name,
-            'status': order.status,
-            'courier_name': order.courier_user.full_name if order.courier_user else None,
-            'created_at': order.created_at.isoformat(),
-            'order_value': order.order_value
-        } for order in recent_orders],
-        'recent_logs': [{
-            'id': log.id,
-            'order_id': log.order_id,
-            'order_number': log.order.order_number if log.order else None,
-            'event_type': log.event_type,
-            'event_description': log.event_description,
-            'timestamp': log.timestamp.isoformat()
-        } for log in recent_logs]
-    })
-
-
-@app.route('/api/admin/order/<int:order_id>')
-@role_required('admin')
-def api_admin_order_detail(order_id):
-    """API endpoint for order detail real-time data"""
-    transitioned_ids = auto_transition_order_statuses()
-    db.session.expire_all()  # Clear cache to get fresh data
-
-    order = Order.query.get_or_404(order_id)
-    logs = DeliveryLog.query.filter_by(order_id=order.id).order_by(DeliveryLog.timestamp.desc()).all()
-
-    from flask import jsonify
-    return jsonify({
-        'auto_transitioned': order.id in transitioned_ids,  # Flag if this order just transitioned
-        'order': {
-            'id': order.id,
-            'order_number': order.order_number,
-            'status': order.status,
-            'restaurant_name': order.restaurant_name,
-            'customer_name': order.customer_name,
-            'customer_phone': order.customer_phone,
-            'delivery_address': order.delivery_address,
-            'pickup_address': order.pickup_address,
-            'courier_name': order.courier_user.full_name if order.courier_user else None,
-            'courier_id': order.courier_id,
-            'order_value': order.order_value,
-            'items_description': order.items_description,
-            'special_instructions': order.special_instructions,
-            'created_at': order.created_at.isoformat() if order.created_at else None,
-            'assigned_at': order.assigned_at.isoformat() if order.assigned_at else None,
-            'picked_up_at': order.picked_up_at.isoformat() if order.picked_up_at else None,
-            'in_transit_at': order.in_transit_at.isoformat() if order.in_transit_at else None,
-            'delivered_at': order.delivered_at.isoformat() if order.delivered_at else None
-        },
-        'logs': [{
-            'id': log.id,
-            'event_type': log.event_type,
-            'event_description': log.event_description,
-            'old_status': log.old_status,
-            'new_status': log.new_status,
-            'timestamp': log.timestamp.isoformat()
-        } for log in logs]
-    })
-
-
-@app.route('/api/restaurant/dashboard-data')
-@role_required('restaurant')
-def api_restaurant_dashboard_data():
-    """API endpoint for restaurant dashboard real-time data"""
-    auto_transition_order_statuses()
-
-    # Active orders only
-    active_orders_list = Order.query.filter_by(restaurant_id=current_user.id).filter(
-        Order.status.in_(['pending', 'assigned', 'picked_up', 'in_transit'])
-    ).order_by(Order.created_at.desc()).all()
-
-    # Statistics
-    all_orders = Order.query.filter_by(restaurant_id=current_user.id).all()
-    total_orders = len(all_orders)
-    pending_orders = sum(1 for o in all_orders if o.status == 'pending')
-    active_orders = sum(1 for o in all_orders if o.status in ['assigned', 'picked_up', 'in_transit'])
-    completed_orders = sum(1 for o in all_orders if o.status == 'delivered')
-    available_couriers = User.query.filter_by(role='courier', is_available=True, is_active=True).count()
-
-    from flask import jsonify
-    return jsonify({
-        'statistics': {
-            'total_orders': total_orders,
-            'pending_orders': pending_orders,
-            'active_orders': active_orders,
-            'completed_orders': completed_orders,
-            'available_couriers': available_couriers
-        },
-        'active_orders': [{
-            'id': order.id,
-            'order_number': order.order_number,
-            'customer_name': order.customer_name,
-            'customer_phone': order.customer_phone,
-            'delivery_address': order.delivery_address,
-            'status': order.status,
-            'courier_name': order.courier_user.full_name if order.courier_user else None,
-            'created_at': order.created_at.isoformat(),
-            'order_value': order.order_value
-        } for order in active_orders_list]
-    })
-
-
-@app.route('/api/restaurant/order/<int:order_id>')
-@role_required('restaurant')
-def api_restaurant_order_detail(order_id):
-    """API endpoint for restaurant order detail"""
-    transitioned_ids = auto_transition_order_statuses()
-    db.session.expire_all()  # Clear cache to get fresh data
-
-    order = Order.query.get_or_404(order_id)
-
-    # Ensure restaurant can only access their own orders
-    if order.restaurant_id != current_user.id:
-        from flask import jsonify
-        return jsonify({'error': 'Unauthorized'}), 403
-
-    logs = DeliveryLog.query.filter_by(order_id=order.id).order_by(DeliveryLog.timestamp.desc()).all()
-
-    from flask import jsonify
-    return jsonify({
-        'auto_transitioned': order.id in transitioned_ids,  # Flag if this order just transitioned
-        'order': {
-            'id': order.id,
-            'order_number': order.order_number,
-            'status': order.status,
-            'customer_name': order.customer_name,
-            'customer_phone': order.customer_phone,
-            'delivery_address': order.delivery_address,
-            'pickup_address': order.pickup_address,
-            'courier_name': order.courier_user.full_name if order.courier_user else None,
-            'courier_id': order.courier_id,
-            'order_value': order.order_value,
-            'items_description': order.items_description,
-            'special_instructions': order.special_instructions,
-            'created_at': order.created_at.isoformat() if order.created_at else None,
-            'assigned_at': order.assigned_at.isoformat() if order.assigned_at else None,
-            'picked_up_at': order.picked_up_at.isoformat() if order.picked_up_at else None,
-            'in_transit_at': order.in_transit_at.isoformat() if order.in_transit_at else None,
-            'delivered_at': order.delivered_at.isoformat() if order.delivered_at else None
-        },
-        'logs': [{
-            'id': log.id,
-            'event_type': log.event_type,
-            'event_description': log.event_description,
-            'old_status': log.old_status,
-            'new_status': log.new_status,
-            'timestamp': log.timestamp.isoformat()
-        } for log in logs]
-    })
-
-
-@app.route('/api/courier/dashboard-data')
-@role_required('courier')
-def api_courier_dashboard_data():
-    """API endpoint for courier dashboard real-time data"""
-    auto_transition_order_statuses()
-
-    # Active orders
-    active_orders = Order.query.filter_by(courier_id=current_user.id).filter(
-        Order.status.in_(['assigned', 'picked_up', 'in_transit'])
-    ).order_by(Order.created_at.desc()).all()
-
-    # Completed today
-    all_orders = Order.query.filter_by(courier_id=current_user.id).all()
-    completed_today = [o for o in all_orders if o.status == 'delivered' and
-                      o.delivered_at and o.delivered_at.date() == utcnow().date()]
-
-    from flask import jsonify
-    return jsonify({
-        'statistics': {
-            'active_orders_count': len(active_orders),
-            'completed_today_count': len(completed_today),
-            'is_available': current_user.is_available,
-            'pending_unavailable': current_user.pending_unavailable
-        },
-        'active_orders': [{
-            'id': order.id,
-            'order_number': order.order_number,
-            'restaurant_name': order.restaurant_name,
-            'customer_name': order.customer_name,
-            'customer_phone': order.customer_phone,
-            'delivery_address': order.delivery_address,
-            'pickup_address': order.pickup_address,
-            'status': order.status,
-            'created_at': order.created_at.isoformat(),
-            'order_value': order.order_value
-        } for order in active_orders]
-    })
-
-
-@app.route('/api/courier/order/<int:order_id>')
-@role_required('courier')
-def api_courier_order_detail(order_id):
-    """API endpoint for courier order detail"""
-    transitioned_ids = auto_transition_order_statuses()
-    db.session.expire_all()  # Clear cache to get fresh data
-
-    order = Order.query.get_or_404(order_id)
-
-    # Ensure courier can only access their assigned orders
-    if order.courier_id != current_user.id:
-        from flask import jsonify
-        return jsonify({'error': 'Unauthorized'}), 403
-
-    logs = DeliveryLog.query.filter_by(order_id=order.id).order_by(DeliveryLog.timestamp.desc()).all()
-
-    from flask import jsonify
-    return jsonify({
-        'auto_transitioned': order.id in transitioned_ids,  # Flag if this order just transitioned
-        'order': {
-            'id': order.id,
-            'order_number': order.order_number,
-            'status': order.status,
-            'restaurant_name': order.restaurant_name,
-            'customer_name': order.customer_name,
-            'customer_phone': order.customer_phone,
-            'delivery_address': order.delivery_address,
-            'pickup_address': order.pickup_address,
-            'order_value': order.order_value,
-            'items_description': order.items_description,
-            'special_instructions': order.special_instructions,
-            'created_at': order.created_at.isoformat() if order.created_at else None,
-            'assigned_at': order.assigned_at.isoformat() if order.assigned_at else None,
-            'picked_up_at': order.picked_up_at.isoformat() if order.picked_up_at else None,
-            'in_transit_at': order.in_transit_at.isoformat() if order.in_transit_at else None,
-            'delivered_at': order.delivered_at.isoformat() if order.delivered_at else None
-        },
-        'logs': [{
-            'id': log.id,
-            'event_type': log.event_type,
-            'event_description': log.event_description,
-            'old_status': log.old_status,
-            'new_status': log.new_status,
-            'timestamp': log.timestamp.isoformat()
-        } for log in logs]
-    })
-
-
-@app.route('/api/order/<int:order_id>/ai-description')
-@login_required
-def api_get_ai_description(order_id):
-    """API endpoint to check if AI description is ready"""
-    order = Order.query.get_or_404(order_id)
-
-    # Check permissions
-    if current_user.role == 'restaurant' and order.restaurant_id != current_user.id:
-        from flask import jsonify
-        return jsonify({'error': 'Unauthorized'}), 403
-    elif current_user.role == 'courier' and order.courier_id != current_user.id:
-        from flask import jsonify
-        return jsonify({'error': 'Unauthorized'}), 403
-
-    from flask import jsonify
-    return jsonify({
-        'ai_enhanced_description': order.ai_enhanced_description,
-        'is_ready': order.ai_enhanced_description is not None
-    })
 
 
 # ==================== Database Initialization ====================
@@ -2072,4 +1994,4 @@ def seed_enhanced():
 
 
 if __name__ == '__main__':
-    app.run(debug=True, port=5000)
+    socketio.run(app, debug=True, host='0.0.0.0', port=5000, allow_unsafe_werkzeug=True)

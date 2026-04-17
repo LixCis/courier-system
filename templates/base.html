@@ -5,6 +5,11 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}Courier System{% endblock %}</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <!-- SocketIO client -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.4/socket.io.js"></script>
+    <!-- Leaflet CSS + JS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script>
         tailwind.config = {
             theme: {
@@ -37,6 +42,15 @@
         @keyframes fadeIn {
             from { opacity: 0; }
             to { opacity: 1; }
+        }
+
+        /* Toast slide in */
+        @keyframes slideIn {
+            from { transform: translateX(100%); opacity: 0; }
+            to { transform: translateX(0); opacity: 1; }
+        }
+        .animate-slide-in {
+            animation: slideIn 0.3s ease-out;
         }
     </style>
 </head>
@@ -105,8 +119,38 @@
                             {% endif %}
                         </div>
                     </div>
-                    <div class="flex items-center">
-                        <div class="flex-shrink-0 text-sm text-gray-700 mr-4">
+                    <div class="flex items-center space-x-4">
+                        <!-- Connection status indicator -->
+                        <div id="connection-status" class="hidden flex items-center text-xs text-red-500">
+                            <span class="w-2 h-2 bg-red-500 rounded-full mr-1"></span>
+                            Disconnected
+                        </div>
+
+                        <!-- Notification bell -->
+                        <div id="notification-bell" class="relative cursor-pointer p-1">
+                            <svg class="h-6 w-6 text-gray-500 hover:text-gray-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
+                            </svg>
+                            <span id="notification-badge" class="hidden absolute -top-1 -right-1 bg-red-500 text-white text-xs rounded-full w-5 h-5 flex items-center justify-center">0</span>
+                        </div>
+
+                        <!-- Notification dropdown -->
+                        <div id="notification-dropdown" class="hidden absolute right-16 top-14 w-80 bg-white rounded-lg shadow-xl border border-gray-200 max-h-96 overflow-y-auto z-50">
+                            <div class="p-3 border-b flex justify-between items-center sticky top-0 bg-white">
+                                <span class="font-semibold text-sm">Notifications</span>
+                                <div class="flex items-center space-x-3">
+                                    <button id="mark-all-read" class="text-xs text-blue-600 hover:underline">Mark all read</button>
+                                    <a href="{{ url_for('notifications_page') }}" class="text-xs text-gray-500 hover:underline">View all</a>
+                                </div>
+                            </div>
+                            <div id="notification-list"></div>
+                            <div id="notification-empty" class="p-4 text-center text-gray-500 text-sm hidden">
+                                No notifications
+                            </div>
+                        </div>
+
+                        <!-- User info -->
+                        <div class="flex-shrink-0 text-sm text-gray-700">
                             <span class="font-medium">{{ current_user.full_name }}</span>
                             {% if current_user.role == 'courier' %}
                                 <span class="ml-2 inline-flex items-center rounded-full px-2 py-1 text-xs font-medium {% if current_user.is_available %}bg-green-100 text-green-700{% else %}bg-gray-100 text-gray-700{% endif %}">
@@ -144,6 +188,9 @@
         </main>
     </div>
 
+    <!-- Toast notifications container -->
+    <div id="toast-container" class="fixed top-20 right-4 z-50 space-y-2"></div>
+
     <!-- Footer -->
     <footer class="bg-white border-t border-gray-200 mt-12">
         <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-4">
@@ -153,10 +200,11 @@
         </div>
     </footer>
 
-    <!-- Auto-refresh system -->
-    <script src="{{ url_for('static', filename='js/auto-refresh.js') }}"></script>
-    <script src="{{ url_for('static', filename='js/dashboard-updater.js') }}"></script>
-    <script src="{{ url_for('static', filename='js/order-detail-updater.js') }}"></script>
+    <!-- SocketIO and map utilities -->
+    {% if current_user.is_authenticated %}
+    <script src="{{ url_for('static', filename='js/socket_base.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/map_utils.js') }}"></script>
+    {% endif %}
 
     {% block extra_js %}{% endblock %}
 </body>
