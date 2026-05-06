@@ -40,71 +40,30 @@ def run_command(command, description, show_output=False):
             print(f"Error details: {e.stderr}")
         return False
 
-def check_build_tools():
-    """Check if Visual C++ Build Tools are installed (Windows only)"""
-    if sys.platform != "win32":
-        return True
+def check_ollama():
+    """Check if Ollama is reachable (optional — app handles absence gracefully)."""
+    import os
+    import urllib.request
+    import urllib.error
 
-    print("Checking for Visual C++ Build Tools...")
+    url = os.getenv("OLLAMA_URL", "http://localhost:11434")
+    model = os.getenv("OLLAMA_MODEL", "qwen2.5:3b")
+    print(f"Checking Ollama at {url}...")
+    try:
+        with urllib.request.urlopen(f"{url}/api/tags", timeout=2) as r:
+            import json
+            tags = json.loads(r.read()).get("models", [])
+            names = [t.get("name", "") for t in tags]
+            if model in names:
+                print(f"✓ Ollama reachable, model '{model}' available")
+            else:
+                print(f"⚠ Ollama reachable but model '{model}' missing")
+                print(f"  Run: ollama pull {model}")
+    except Exception:
+        print(f"⚠ Ollama not reachable at {url} — AI features will be disabled")
+        print(f"  Start it with: docker compose up -d ollama  (or `ollama serve` natively)")
+    return True  # never block setup
 
-    # Check for common MSVC installations
-    program_files = [
-        os.environ.get('ProgramFiles(x86)', 'C:\\Program Files (x86)'),
-        os.environ.get('ProgramFiles', 'C:\\Program Files')
-    ]
-
-    msvc_paths = [
-        "Microsoft Visual Studio\\2026\\BuildTools\\VC\\Tools\\MSVC",
-        "Microsoft Visual Studio\\2026\\Community\\VC\\Tools\\MSVC",
-        "Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC",
-        "Microsoft Visual Studio\\2022\\Community\\VC\\Tools\\MSVC",
-        "Microsoft Visual Studio\\2019\\BuildTools\\VC\\Tools\\MSVC",
-    ]
-
-    for pf in program_files:
-        for msvc in msvc_paths:
-            full_path = os.path.join(pf, msvc)
-            if os.path.exists(full_path):
-                print(f"✓ Found Visual C++ Build Tools at: {full_path}")
-                return True
-
-    print("\n" + "!"*70)
-    print("WARNING: Visual C++ Build Tools not detected!")
-    print("!"*70)
-    print("\nllama-cpp-python requires C++ compilation tools.")
-    print("\nTo install Build Tools:")
-    print("1. Download: https://visualstudio.microsoft.com/downloads/#build-tools-for-visual-studio-2022")
-    print("2. Run installer and select 'Desktop development with C++'")
-    print("3. Restart computer after installation")
-    print("4. Run this setup script again")
-    print("\n" + "!"*70 + "\n")
-
-    response = input("Continue anyway? Installation may fail. (y/n): ")
-    return response.lower() == 'y'
-
-def check_llama_model():
-    """Check if Llama model exists"""
-    model_path = Path("models/llama-3.2-3b.gguf")
-
-    print("Checking for Llama 3.2-3B model...")
-
-    if model_path.exists():
-        size_mb = model_path.stat().st_size / (1024 * 1024)
-        print(f"✓ Found Llama model: {model_path} ({size_mb:.1f} MB)")
-        return True
-    else:
-        print("\n" + "!"*70)
-        print("ERROR: Llama model not found!")
-        print("!"*70)
-        print(f"\nExpected location: {model_path.absolute()}")
-        print("\nDownload the model:")
-        print("  URL: https://huggingface.co/bartowski/Llama-3.2-3B-Instruct-GGUF/resolve/main/Llama-3.2-3B-Instruct-Q6_K.gguf")
-        print("  Size: ~2.5GB")
-        print("\nAfter download:")
-        print(f"  1. Rename to: llama-3.2-3b.gguf")
-        print(f"  2. Place in: {model_path.parent.absolute()}")
-        print("\n" + "!"*70 + "\n")
-        return False
 
 def main():
     print_header("AI-Enhanced Courier System - Setup Wizard")
@@ -120,22 +79,14 @@ def main():
             print("\nSetup cancelled. Please activate virtual environment and try again.")
             return
 
-    # Step 1: Check Build Tools (Windows only)
-    print_step(1, 5, "Checking prerequisites")
-    if not check_build_tools():
-        print("\nSetup cancelled. Please install Build Tools first.")
-        return
+    # Step 1: Check Ollama (non-fatal — app degrades gracefully if absent)
+    print_step(1, 4, "Checking prerequisites")
+    check_ollama()
+    print("\n✓ Prerequisites checked\n")
 
-    # Step 2: Check Llama model
-    if not check_llama_model():
-        print("\nSetup cancelled. Please add Llama model first.")
-        return
-
-    print("\n✓ All prerequisites met!\n")
-
-    # Step 3: Install Python dependencies
-    print_step(2, 5, "Installing Python dependencies")
-    print("\n⏱ This may take 5-10 minutes (llama-cpp-python needs to compile)...")
+    # Step 2: Install Python dependencies
+    print_step(2, 4, "Installing Python dependencies")
+    print("\n⏱ This may take 1-2 minutes...")
     print("Please be patient...\n")
 
     if not run_command(
@@ -151,13 +102,12 @@ def main():
     ):
         print("\n✗ Dependency installation failed!")
         print("Common issues:")
-        print("  - Build Tools not installed correctly")
         print("  - Insufficient disk space")
         print("  - Network connectivity issues")
         return
 
-    # Step 4: Initialize database
-    print_step(3, 5, "Initializing database")
+    # Step 3: Initialize database
+    print_step(3, 4, "Initializing database")
     if not run_command(
         f'"{sys.executable}" -m flask init-db',
         "Database initialization"
@@ -165,8 +115,8 @@ def main():
         print("\n✗ Database initialization failed!")
         return
 
-    # Step 5: Seed database with demo data
-    print_step(4, 5, "Seeding database with demo data")
+    # Step 4: Seed database with demo data
+    print_step(4, 4, "Seeding database with demo data")
     if not run_command(
         f'"{sys.executable}" -m flask seed-db',
         "Database seeding"
@@ -193,11 +143,11 @@ def main():
     print("\n" + "=" * 70)
 
     print("\n📝 Important Notes:")
-    print("  • Llama model (2.5GB) will load on first use (~5-10 seconds)")
-    print("  • BLIP vision model (~990MB) downloads automatically on first photo analysis")
+    print("  • AI models run inside Ollama (separate service at OLLAMA_URL)")
+    print("  • Pull models once:  ollama pull qwen2.5:3b  &&  ollama pull moondream")
+    print("  • Models are pre-warmed at app startup for instant first response")
     print("  • AI insights are cached for 24 hours to reduce model calls")
-    print("  • Total disk space needed: ~3.5GB (models + dependencies)")
-    print("  • Recommended: 4GB+ RAM for optimal performance")
+    print("  • Recommended: Docker Compose (docker compose up -d) — bundles Postgres + Ollama")
 
     print("\n🚀 Starting the application...\n")
     print("=" * 70)

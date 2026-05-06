@@ -11,6 +11,7 @@
         </p>
 
         <form action="{{ url_for('courier_update_location') }}" method="POST" class="mt-6">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <div class="bg-white shadow sm:rounded-lg">
                 <div class="px-4 py-5 sm:p-6">
                     <!-- Current Location Display -->

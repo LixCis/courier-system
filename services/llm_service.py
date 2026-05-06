@@ -2,135 +2,174 @@
 LLM Service for Order Description Standardization
 
 This module provides AI-powered standardization of order item descriptions
-using a local Llama model. The model is loaded lazily to avoid slowing down
-application startup.
+using Ollama HTTP API for remote inference.
 """
 
 import os
 import threading
-from pathlib import Path
+import time
+import requests
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class LLMService:
     """
-    Service for standardizing order descriptions using local LLM
+    Service for standardizing order descriptions using Ollama HTTP API
 
-    Uses lazy loading pattern - model is only loaded when first needed,
-    not at application startup. This prevents slow startup times.
+    Connects to a remote Ollama instance via HTTP. Availability is cached
+    for 60 seconds to avoid hammering the server with ping requests.
     """
 
-    def __init__(self, model_path=None):
+    def __init__(self):
         """
-        Initialize LLM service (does not load model yet)
+        Initialize LLM service with Ollama configuration
 
-        Args:
-            model_path: Path to the GGUF model file. If None, uses default path.
+        Reads from environment variables:
+            OLLAMA_URL: Ollama server URL (default: http://localhost:11434)
+            OLLAMA_MODEL: Model name/tag (default: qwen2.5:3b)
         """
-        self.llm = None
-        self._model_loaded = False
-        self._loading = False  # Flag to prevent concurrent loading attempts
-        self._lock = threading.Lock()  # Thread safety for model access
+        self.ollama_url = os.getenv("OLLAMA_URL", "http://localhost:11434").rstrip("/")
+        self.ollama_model = os.getenv("OLLAMA_MODEL", "qwen2.5:3b")
 
-        # Default model path
-        if model_path is None:
-            self.model_path = Path("models/llama-3.2-3b.gguf")
-        else:
-            self.model_path = Path(model_path)
+        self._available = None  # Cached availability (None = not checked yet)
+        self._availability_check_time = None  # When we last checked
+        self._availability_cache_ttl = 60  # Cache for 60 seconds
+        self._lock = threading.Lock()  # Thread safety
 
-    def _load_model(self):
+    def _check_available(self):
         """
-        Lazy load the LLM model (thread-safe)
+        Check if Ollama is reachable and model exists (not cached)
 
-        Only loads once, subsequent calls do nothing.
-        Returns True if model loaded successfully, False otherwise.
+        Returns:
+            bool: True if Ollama is reachable and model is available, False otherwise
         """
-        # Quick check without lock
-        if self._model_loaded:
+        try:
+            # Ping Ollama to check if it's running
+            response = requests.get(
+                f"{self.ollama_url}/api/tags",
+                timeout=2
+            )
+
+            if response.status_code != 200:
+                logger.warning(f"Ollama server returned status {response.status_code}")
+                return False
+
+            # Check if our model is in the list
+            data = response.json()
+            models = data.get("models", [])
+            model_names = [m.get("name", "") for m in models]
+
+            # Ollama tags bare names as ':latest' — accept both forms
+            if (self.ollama_model not in model_names
+                    and f"{self.ollama_model}:latest" not in model_names):
+                logger.warning(f"Model {self.ollama_model} not found in Ollama. Available: {model_names}")
+                return False
+
             return True
 
-        # Acquire lock for thread-safe loading
-        with self._lock:
-            # Double-check after acquiring lock (another thread might have loaded it)
-            if self._model_loaded:
-                return True
-
-            # Check if another thread is currently loading
-            if self._loading:
-                # Wait a bit and check again (another thread is loading)
-                import time
-                time.sleep(0.1)
-                return self._model_loaded
-
-            # Set loading flag to prevent other threads from trying
-            self._loading = True
-
-            try:
-                # Check if model file exists
-                if not self.model_path.exists():
-                    print(f"WARNING: LLM model not found at {self.model_path}")
-                    print(f"AI description enhancement will be disabled.")
-                    print(f"To enable AI features, download llama-3.2-3b.gguf and place it in models/ directory")
-                    return False
-
-                try:
-                    from llama_cpp import Llama
-
-                    print(f"Loading LLM model from {self.model_path}...")
-                    self.llm = Llama(
-                        model_path=str(self.model_path),
-                        n_ctx=512,  # Context window (tokens)
-                        n_threads=4,  # CPU threads to use
-                        verbose=False  # Suppress verbose output
-                    )
-                    self._model_loaded = True
-                    print("LLM model loaded successfully!")
-                    return True
-
-                except ImportError:
-                    print("ERROR: llama-cpp-python not installed!")
-                    print("Install it with: pip install llama-cpp-python")
-                    return False
-                except Exception as e:
-                    print(f"ERROR loading LLM model: {e}")
-                    return False
-
-            finally:
-                # Always clear loading flag
-                self._loading = False
+        except requests.exceptions.Timeout:
+            logger.warning(f"Ollama timeout at {self.ollama_url}")
+            return False
+        except requests.exceptions.ConnectionError:
+            logger.warning(f"Cannot connect to Ollama at {self.ollama_url}")
+            return False
+        except Exception as e:
+            logger.warning(f"Error checking Ollama availability: {e}")
+            return False
 
     def is_available(self):
         """
-        Check if LLM service is available
+        Check if LLM service is available (with 60s cache)
 
         Returns:
-            bool: True if model is loaded or can be loaded, False otherwise
+            bool: True if Ollama is reachable and model exists, False otherwise
         """
-        if self._model_loaded:
-            return True
-        return self._load_model()
+        with self._lock:
+            now = time.time()
+
+            # Return cached result if still valid
+            if (self._available is not None and
+                self._availability_check_time is not None and
+                now - self._availability_check_time < self._availability_cache_ttl):
+                return self._available
+
+            # Check availability and cache result
+            self._available = self._check_available()
+            self._availability_check_time = now
+            return self._available
 
     def generate(self, prompt, **kwargs):
         """
-        Thread-safe wrapper for LLM text generation
+        Thread-safe wrapper for LLM text generation via Ollama HTTP API
 
-        Use this method instead of accessing self.llm() directly to ensure thread safety.
+        Calls Ollama's /api/generate endpoint with configurable parameters.
 
         Args:
             prompt: Text prompt for generation
-            **kwargs: Additional arguments passed to llama.cpp (max_tokens, temperature, etc.)
+            **kwargs: Additional arguments (max_tokens, temperature, top_p, repeat_penalty, stop, echo, etc.)
 
         Returns:
-            dict: Response from llama.cpp with 'choices' key, or None if unavailable
+            dict: Response dict with structure matching llama-cpp-python:
+                  {'choices': [{'text': '...generated text...'}]}
+                  Returns None if unavailable or error occurs.
         """
         if not self.is_available():
             return None
 
-        # CRITICAL: Use lock to prevent concurrent access
         with self._lock:
             try:
-                return self.llm(prompt, **kwargs)
+                # Map kwargs to Ollama API parameters
+                payload = {
+                    "model": self.ollama_model,
+                    "prompt": prompt,
+                    "stream": False,
+                }
+
+                # Map common inference parameters
+                if "max_tokens" in kwargs:
+                    payload["num_predict"] = kwargs["max_tokens"]
+                if "temperature" in kwargs:
+                    payload["temperature"] = kwargs["temperature"]
+                if "top_p" in kwargs:
+                    payload["top_p"] = kwargs["top_p"]
+                if "repeat_penalty" in kwargs:
+                    payload["repeat_penalty"] = kwargs["repeat_penalty"]
+                if "stop" in kwargs:
+                    payload["stop"] = kwargs["stop"]
+
+                # Call Ollama API
+                response = requests.post(
+                    f"{self.ollama_url}/api/generate",
+                    json=payload,
+                    timeout=120  # Generous timeout for generation
+                )
+
+                if response.status_code != 200:
+                    logger.warning(f"Ollama API error: {response.status_code}")
+                    return None
+
+                data = response.json()
+
+                # Transform to match llama-cpp-python format
+                generated_text = data.get("response", "")
+                return {
+                    "choices": [
+                        {
+                            "text": generated_text,
+                        }
+                    ]
+                }
+
+            except requests.exceptions.Timeout:
+                logger.warning("Ollama generation timeout")
+                return None
+            except requests.exceptions.ConnectionError:
+                logger.warning(f"Cannot connect to Ollama at {self.ollama_url}")
+                return None
             except Exception as e:
-                print(f"ERROR during LLM generation: {e}")
+                logger.warning(f"Error during Ollama generation: {e}")
                 return None
 
     def enhance_description(self, raw_description):
@@ -148,7 +187,7 @@ class LLMService:
         if not raw_description or not raw_description.strip():
             return None
 
-        # Try to load model if not already loaded
+        # Try to check if service is available
         if not self.is_available():
             return None
 
@@ -180,7 +219,6 @@ Standardizovaný popis:"""
                 top_p=0.85,  # Slightly lower for more focused output
                 repeat_penalty=1.1,  # Penalize repetition
                 stop=["Původní:", "Nyní standardizuj", "\n\n"],  # Stop tokens
-                echo=False  # Don't include prompt in output
             )
 
             # Check if generation failed
@@ -192,7 +230,7 @@ Standardizovaný popis:"""
 
             # Basic validation
             if len(enhanced) < 5:
-                print(f"WARNING: AI response too short (length: {len(enhanced)})")
+                logger.warning(f"AI response too short (length: {len(enhanced)})")
                 return None
 
             # Allow reasonable expansion - short inputs can expand more
@@ -202,21 +240,21 @@ Standardizovaný popis:"""
             )
 
             if len(enhanced) > max_allowed_length:
-                print(f"WARNING: AI response suspiciously long")
-                print(f"  Input ({len(raw_description)} chars): {raw_description[:100]}")
-                print(f"  Output ({len(enhanced)} chars): {enhanced[:100]}")
+                logger.warning(f"AI response suspiciously long")
+                logger.warning(f"  Input ({len(raw_description)} chars): {raw_description[:100]}")
+                logger.warning(f"  Output ({len(enhanced)} chars): {enhanced[:100]}")
                 return None
 
             # Log successful enhancement for debugging
-            print(f"[AI] Enhanced: '{raw_description[:50]}...' -> '{enhanced[:50]}...' ({len(raw_description)} -> {len(enhanced)} chars)")
+            logger.info(f"[AI] Enhanced: '{raw_description[:50]}...' -> '{enhanced[:50]}...' ({len(raw_description)} -> {len(enhanced)} chars)")
             return enhanced
 
         except Exception as e:
-            print(f"ERROR during AI description enhancement: {e}")
+            logger.warning(f"Error during AI description enhancement: {e}")
             return None
 
 
-# Global instance (lazy-loaded)
+# Global instance
 llm_service = LLMService()
 
 

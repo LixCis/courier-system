@@ -1,14 +1,13 @@
 Flask==3.0.0
 Flask-SQLAlchemy==3.1.1
 Flask-Login==0.6.3
+Flask-Migrate==4.0.5
+Flask-WTF==1.2.1
 Werkzeug==3.0.1
 python-dotenv==1.0.0
 
-# Image Processing & Vision AI
+# Image Processing (EXIF/GPS extraction, quality checks)
 Pillow==12.0.0
-transformers>=4.30.0
-torch>=2.0.0
-torchvision>=0.15.0
 
 # Intelligent Assignment Algorithm
 geopy==2.4.1
@@ -16,10 +15,14 @@ geopy==2.4.1
 # Background Scheduler for pending orders
 APScheduler==3.10.4
 
-# Local LLM for order description standardization
-llama-cpp-python==0.2.90
+# Ollama HTTP API client for order description standardization
+requests==2.31.0
 
 # WebSocket real-time communication
 flask-socketio==5.3.6
 gevent==25.9.1
 gevent-websocket==0.10.1
+
+# Testing
+pytest==8.3.3
+pytest-flask==1.3.0

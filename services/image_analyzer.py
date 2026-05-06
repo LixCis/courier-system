@@ -3,14 +3,22 @@ Unified Image Analyzer for Delivery Proof Photos
 
 Combines GPS extraction, quality checking, and AI vision analysis
 into one streamlined service.
+
+AI vision analysis is delegated to Ollama (multimodal models like moondream
+or llava-phi3). Configure via OLLAMA_URL and OLLAMA_VISION_MODEL env vars.
 """
 
+import base64
+import logging
+import os
+
+import requests
 from PIL import Image, ImageStat, ImageFilter
 from PIL.ExifTags import TAGS, GPSTAGS
 from datetime import datetime
 from typing import Dict, Optional, Tuple
-import os
-import json
+
+logger = logging.getLogger(__name__)
 
 
 # ==================== GPS / EXIF Metadata Extraction ====================
@@ -206,150 +214,186 @@ def _calculate_blur_score(grayscale_image: Image.Image) -> float:
         return 100.0
 
 
-# ==================== AI Vision Analysis (BLIP) ====================
+# ==================== AI Vision Analysis (Ollama multimodal) ====================
 
 class VisionAnalyzer:
-    """Lazy-loaded vision model for analyzing delivery proof photos."""
+    """Vision analyzer using an Ollama multimodal model (e.g. moondream)."""
 
     _instance = None
-    _model = None
-    _processor = None
-    _model_loaded = False
 
     def __new__(cls):
         if cls._instance is None:
             cls._instance = super(VisionAnalyzer, cls).__new__(cls)
+            cls._instance._init_config()
         return cls._instance
 
-    def is_available(self) -> bool:
-        """Check if vision model is available."""
-        return self._model_loaded
+    def _init_config(self):
+        self.ollama_url = os.getenv("OLLAMA_URL", "http://localhost:11434").rstrip("/")
+        self.vision_model = os.getenv("OLLAMA_VISION_MODEL", "moondream")
+        # Generous default: cold-starting a multimodal model + 3 queries
+        self.request_timeout = int(os.getenv("OLLAMA_VISION_TIMEOUT", "180"))
 
-    def load_model(self):
-        """Load BLIP vision model (lazy loading)."""
-        if self._model_loaded:
-            return
-
+    def warmup(self) -> bool:
+        """Load model into VRAM with a trivial request so first real query is fast."""
+        if not self.is_available():
+            return False
         try:
-            print("[Vision] Loading BLIP vision model (first time only)...")
-            from transformers import BlipProcessor, BlipForConditionalGeneration
-
-            model_id = "Salesforce/blip-image-captioning-base"
-
-            self._processor = BlipProcessor.from_pretrained(model_id)
-            self._model = BlipForConditionalGeneration.from_pretrained(
-                model_id,
-                low_cpu_mem_usage=True
+            requests.post(
+                f"{self.ollama_url}/api/generate",
+                json={
+                    "model": self.vision_model,
+                    "prompt": "warmup",
+                    "stream": False,
+                    "keep_alive": "30m",
+                },
+                timeout=self.request_timeout,
             )
-
-            self._model_loaded = True
-            print("[Vision] Model loaded successfully!")
-
+            return True
         except Exception as e:
-            print(f"[Vision] Failed to load model: {e}")
-            self._model_loaded = False
+            logger.warning(f"Vision warmup failed: {e}")
+            return False
+
+    def is_available(self) -> bool:
+        """Return True if the Ollama vision model is reachable."""
+        try:
+            r = requests.get(f"{self.ollama_url}/api/tags", timeout=2)
+            if r.status_code != 200:
+                return False
+            names = [m.get("name", "") for m in r.json().get("models", [])]
+            # Ollama tags bare names as ':latest' — match both forms
+            return (self.vision_model in names
+                    or f"{self.vision_model}:latest" in names)
+        except Exception:
+            return False
+
+    def _query(self, image_b64: str, prompt: str) -> str:
+        """Send one multimodal prompt to Ollama and return the text response."""
+        try:
+            r = requests.post(
+                f"{self.ollama_url}/api/generate",
+                json={
+                    "model": self.vision_model,
+                    "prompt": prompt,
+                    "images": [image_b64],
+                    "stream": False,
+                    "keep_alive": "30m",  # Keep model hot between requests
+                },
+                timeout=self.request_timeout,
+            )
+            if r.status_code != 200:
+                logger.warning(f"Ollama vision API returned {r.status_code}")
+                return ""
+            return r.json().get("response", "").strip()
+        except requests.exceptions.Timeout:
+            logger.warning("Ollama vision timeout")
+            return ""
+        except Exception as e:
+            logger.warning(f"Ollama vision error: {e}")
+            return ""
 
     def analyze_photo(self, image_path: str, order_description: str = None) -> Dict:
         """
-        Analyze delivery proof photo using AI vision (BLIP).
+        Analyze a delivery proof photo via Ollama multimodal.
 
-        Args:
-            image_path: Path to photo
-            order_description: Optional order description for context
-
-        Returns:
-            Dictionary with AI analysis results
+        Uses a single structured prompt so the model reasons holistically
+        (faster than 3 separate calls, more consistent output).
         """
-        if not self._model_loaded:
-            self.load_model()
-
-        if not self._model_loaded:
+        if not self.is_available():
             return {
                 'description': 'Vision analysis unavailable',
-                'is_legitimate': True,  # Default to true if model fails
+                'is_legitimate': True,
                 'confidence': 0,
-                'flags': ['Model not loaded'],
+                'flags': ['Ollama vision model not available'],
                 'matches_order': None,
-                'raw_answers': []
+                'raw_answers': [],
             }
 
         try:
-            image = Image.open(image_path).convert('RGB')
+            with open(image_path, "rb") as f:
+                image_b64 = base64.b64encode(f.read()).decode("ascii")
 
-            # Generate unconditional caption (what the model sees)
-            inputs = self._processor(image, return_tensors="pt")
-            caption_output = self._model.generate(**inputs, max_new_tokens=50)
-            caption = self._processor.decode(caption_output[0], skip_special_tokens=True)
+            order_line = (f"The customer ordered: {order_description}\n"
+                          if order_description else "")
 
-            # Generate conditional captions with prompts
-            prompts = [
-                "a photo of",
-                "this is a delivery photo showing",
-                "package or food at"
-            ]
+            prompt = (
+                "You are verifying a delivery proof photo uploaded by a courier.\n"
+                f"{order_line}"
+                "Look carefully at the photo and answer in EXACTLY this format "
+                "(one line per field, no extra text):\n"
+                "DESCRIPTION: <one sentence describing what is visible>\n"
+                "LEGITIMATE: <yes or no — does this plausibly show a delivered food/package?>\n"
+                "MATCHES_ORDER: <yes, no, or unknown — does the visible content match the order?>\n"
+                "REASON: <one short sentence justifying the yes/no answers>"
+            )
 
-            conditional_captions = []
-            for prompt in prompts:
-                inputs = self._processor(image, text=prompt, return_tensors="pt")
-                output = self._model.generate(**inputs, max_new_tokens=30)
-                cond_caption = self._processor.decode(output[0], skip_special_tokens=True)
-                conditional_captions.append(cond_caption)
+            raw = self._query(image_b64, prompt)
+            fields = self._parse_structured(raw)
 
-            # Combine all outputs
-            all_answers = [caption] + conditional_captions
+            description = fields.get('DESCRIPTION', '').strip()
+            legit = fields.get('LEGITIMATE', '').strip().lower()
+            match = fields.get('MATCHES_ORDER', '').strip().lower()
+            reason = fields.get('REASON', '').strip()
 
-            # Analyze the caption for delivery-related keywords
-            caption_lower = caption.lower()
-            delivery_keywords = ['box', 'package', 'food', 'door', 'doorstep', 'delivery',
-                               'bag', 'pizza', 'burger', 'meal', 'envelope', 'parcel']
+            # Parse MATCHES_ORDER
+            matches_order = None
+            if match.startswith('yes'):
+                matches_order = True
+            elif match.startswith('no'):
+                matches_order = False
 
-            has_delivery_keyword = any(kw in caption_lower for kw in delivery_keywords)
-
-            # Calculate confidence
-            confidence = 60  # Base confidence
+            # Confidence scoring
             flags = []
+            confidence = 60
 
-            if has_delivery_keyword:
-                confidence += 20
-            else:
-                flags.append('No clear delivery item visible')
-                confidence -= 20
+            if legit.startswith('yes'):
+                confidence += 25
+            elif legit.startswith('no'):
+                confidence -= 30
+                flags.append('AI thinks photo does not show a delivery')
 
-            # Simple heuristics for quality
-            if len(caption.split()) < 3:
-                flags.append('Low detail in image')
+            if matches_order is True:
+                confidence += 15
+            elif matches_order is False:
+                confidence -= 10
+                flags.append('AI thinks photo does not match the order')
+
+            if not description:
+                flags.append('Vision model returned empty description')
                 confidence -= 10
 
-            # Check order match if provided
-            matches_order = None
-            if order_description:
-                desc_lower = order_description.lower()
-                # Check if any words from order description appear in caption
-                order_words = [w for w in desc_lower.split() if len(w) > 3]
-                matching_words = sum(1 for word in order_words if word in caption_lower)
-                if matching_words > 0:
-                    matches_order = True
-                    confidence += 10
+            display = description or reason or raw[:120] or 'Analysis unavailable'
 
             return {
-                'description': caption.capitalize(),
+                'description': display[:240].strip().capitalize() if display else 'Analysis unavailable',
                 'is_legitimate': confidence >= 50,
-                'confidence': min(95, max(5, confidence)),  # Clamp 5-95
+                'confidence': min(95, max(5, confidence)),
                 'flags': flags,
                 'matches_order': matches_order,
-                'raw_answers': all_answers
+                'raw_answers': [raw] if raw else [],
             }
 
         except Exception as e:
-            print(f"[Vision] Error analyzing photo: {e}")
+            logger.warning(f"Error analyzing photo: {e}")
             return {
-                'description': f'Analysis failed: {str(e)}',
+                'description': f'Analysis failed: {e}',
                 'is_legitimate': True,
                 'confidence': 0,
                 'flags': ['Analysis error'],
                 'matches_order': None,
-                'raw_answers': []
+                'raw_answers': [],
             }
+
+    @staticmethod
+    def _parse_structured(raw: str) -> Dict[str, str]:
+        """Parse FIELD: value lines out of the model response."""
+        result = {}
+        for line in raw.splitlines():
+            if ':' in line:
+                key, _, value = line.partition(':')
+                key = key.strip().upper().lstrip('*- ').rstrip('*')
+                if key in ('DESCRIPTION', 'LEGITIMATE', 'MATCHES_ORDER', 'REASON'):
+                    result[key] = value.strip().strip('*').strip()
+        return result
 
 
 # Global instance

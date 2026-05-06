@@ -1,0 +1,33 @@
+.venv/
+venv/
+.git/
+.gitignore
+__pycache__/
+**/__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+
+# Runtime state
+flask_session/
+static/uploads/
+instance/*.db
+*.sqlite
+*.db
+
+# Secrets
+.env
+.env.local
+
+# Docs and IDE
+docs/
+.vscode/
+.idea/
+*.md
+!README.md
+
+# OS
+.DS_Store
+Thumbs.db

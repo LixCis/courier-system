@@ -13,6 +13,7 @@
             </div>
             <div class="mt-4 flex space-x-3 md:ml-4 md:mt-0">
                 <form method="POST" action="{{ url_for('admin_force_refresh_ai_cache') }}" onsubmit="return confirm('🔄 This will clear ALL AI cache and force regeneration.\n\nThis may take a while as AI summaries will be regenerated on next view.\n\nContinue?');">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                     <button type="submit"
                             class="inline-flex items-center rounded-md bg-yellow-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-yellow-500">
                         <svg class="h-4 w-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">

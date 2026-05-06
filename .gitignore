@@ -45,13 +45,6 @@ static/uploads/*
 # AI Model Cache
 .cache/
 huggingface/
-transformers_cache/
-
-# AI Models (large files - use Git LFS or external storage)
-# Comment out if you want to track models in Git LFS
-models/*.gguf
-models/*.bin
-models/*.safetensors
 
 # Testing
 .pytest_cache/

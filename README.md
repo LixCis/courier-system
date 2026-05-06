@@ -1,236 +1,248 @@
 # AI-Enhanced Courier Delivery System
 
-Flask-based courier management system with AI-powered order processing and delivery verification. Student project demonstrating practical AI integration in web applications.
+Flask courier management system with real-time WebSocket tracking, AI order standardization, and AI delivery-proof verification. Student project demonstrating practical AI integration.
 
 ## Features
 
-### Core Functionality
-- **Role-Based Access** - Admin, Restaurant, and Courier dashboards
-- **Automatic Courier Assignment** - Intelligent assignment based on availability and location
-- **Real-time Order Tracking** - Live status updates and delivery monitoring
-- **Delivery Proof System** - Photo upload with GPS verification and image quality checks
+### Core
+- **Role-based access** — Admin, Restaurant, Courier dashboards
+- **Automatic courier assignment** — distance- and availability-aware
+- **Real-time live updates** — Flask-SocketIO over gevent (no polling)
+- **In-app notifications** — persisted in DB, pushed live over WebSocket
+- **Live maps** — Leaflet + OSRM routing, color-coded per order, live courier position
+- **Delivery proof** — photo upload with EXIF GPS extraction and AI analysis
 
-### AI-Powered Features
-- **Order Standardization** - Llama 3.2-3B automatically formats order descriptions
-- **Photo Analysis** - BLIP vision model verifies delivery photos and detects fraud
-- **AI Insights** - Personalized performance analytics for all user roles
-- **Background Processing** - Non-blocking AI with thread-safe model access
+### AI-Powered (all via Ollama)
+- **Order standardization** — Qwen2.5 3B enhances free-form order text
+- **Delivery-photo analysis** — Moondream multimodal verifies photos
+- **AI insights** — per-user analytics generated on startup, cached 24 h
+
+### Security & Reliability
+- **CSRF protection** on every form (Flask-WTF)
+- **Server-side sessions**, HTTPOnly cookies, SameSite=Lax
+- **Database migrations** via Alembic (Flask-Migrate)
+- **Automated pytest smoke suite** (22 tests)
 
 ## Tech Stack
 
-- **Backend**: Python 3.8+, Flask 3.0, SQLAlchemy (SQLite)
-- **AI Models**: Llama 3.2-3B (GGUF), BLIP (vision-language)
-- **Frontend**: Jinja2, Tailwind CSS, JavaScript
+| Layer | Tech |
+|-------|------|
+| Backend | Python 3.13, Flask 3, Flask-SocketIO, gevent |
+| Database | PostgreSQL 16 (SQLite supported for local dev) |
+| Migrations | Alembic / Flask-Migrate |
+| AI inference | [Ollama](https://ollama.com) — HTTP API, separate container |
+| Text model | `qwen2.5:3b` (~1.9 GB, strong in Czech/EN) |
+| Vision model | `moondream` (~1.7 GB, multimodal) |
+| Frontend | Jinja2, Tailwind CSS, Leaflet, Socket.IO client |
+| Container runtime | Docker Compose (web + postgres + ollama) |
+| GPU | Optional NVIDIA passthrough (auto-fallback to CPU) |
 
-## Quick Start
+## Quick Start — Docker (recommended)
 
-### Prerequisites
+One command spins up web + Postgres + Ollama:
 
-1. **Python 3.8+** - [Download](https://python.org)
-2. **Visual C++ Build Tools** (Windows) - [Download](https://visualstudio.microsoft.com/downloads/#build-tools-for-visual-studio-2022)
-   - Select "Desktop development with C++" during installation
-3. **Llama Model** - Download and place in `models/` folder:
-   - Model: [Llama-3.2-3B-Instruct-Q6_K.gguf](https://huggingface.co/bartowski/Llama-3.2-3B-Instruct-GGUF/resolve/main/Llama-3.2-3B-Instruct-Q6_K.gguf) (~2.5GB)
-   - Rename to: `llama-3.2-3b.gguf`
-   - Location: `models/llama-3.2-3b.gguf`
-
-### Installation
-
-**Windows - One Click:**
 ```bash
-run.bat
+docker compose up -d --build
 ```
 
-**Manual Install:**
+The `web` container's entrypoint waits for Postgres, creates tables, and auto-seeds demo data on first run.
+
+Pull the AI models into the Ollama container once (~3.6 GB total):
+
 ```bash
-# 1. Create & activate virtual environment
+docker compose exec ollama ollama pull qwen2.5:3b
+docker compose exec ollama ollama pull moondream
+```
+
+Open **http://localhost:5000** and log in with a demo account.
+
+### GPU acceleration (optional)
+
+Uncomment nothing — `docker-compose.yml` already reserves the NVIDIA GPU. Requirements:
+
+- **Windows:** Docker Desktop on WSL2 with current NVIDIA driver (CUDA on WSL is built in)
+- **Linux:** [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html)
+
+If no GPU is available, comment out the `deploy:` block in the `ollama` service — Ollama silently falls back to CPU.
+
+## Quick Start — Native dev (no Docker)
+
+```bash
 python -m venv .venv
 .venv\Scripts\activate          # Windows
 source .venv/bin/activate       # Linux/Mac
 
-# 2. Install dependencies (~5-10 minutes first time)
 pip install -r requirements.txt
 
-# 3. Setup database
-flask init-db
-flask seed-db
+# Start Ollama separately
+ollama serve
+ollama pull qwen2.5:3b
+ollama pull moondream
 
-# 4. Run
+# Optional: Postgres via Docker or local install
+# Default falls back to sqlite:///courier.db
+
+flask db upgrade  # or flask init-db on fresh DB
+flask seed-db
 python app.py
 ```
 
-Access at: **http://localhost:5000**
+## Configuration
+
+All settings via env vars (see `.env`):
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `DATABASE_URI` | `sqlite:///courier.db` | Connection string (use `postgresql://…` in prod) |
+| `SECRET_KEY` | `dev-secret-change-in-production` | Flask session signing |
+| `OLLAMA_URL` | `http://localhost:11434` | Ollama endpoint |
+| `OLLAMA_MODEL` | `qwen2.5:3b` | Text model tag |
+| `OLLAMA_VISION_MODEL` | `moondream` | Multimodal model tag |
+| `OLLAMA_VISION_TIMEOUT` | `180` | Seconds to wait for vision inference |
+| `WTF_CSRF_ENABLED` | `true` | Disable only in tests |
+
+Switch text model without rebuilding:
+
+```bash
+echo "OLLAMA_MODEL=phi3.5" >> .env
+docker compose up -d web
+```
 
 ## Demo Accounts
 
-| Role | Username | Password | Description |
-|------|----------|----------|-------------|
-| **Admin** | admin | admin123 | System administration |
-| **Restaurant** | pizza_palace | rest123 | Pizza Palace Ostrava |
-| **Restaurant** | burger_king | rest123 | Burger Kingdom Stodolní |
-| **Courier** | john_courier | courier123 | John Doe |
-| **Courier** | jane_courier | courier123 | Jane Smith |
-| **Courier** | mike_courier | courier123 | Mike Johnson |
-
-## AI Features
-
-### 1. Order Description Standardization
-- **Model**: Llama 3.2-3B Instruct (3B parameters, Q6_K quantization)
-- **Example**: "dvě pizzy margherita jedna bez sýra" → "2x pizza Margherita (1x bez sýra)"
-- **Processing**: Background threads, non-blocking UI
-- **Performance**: 5-10s first load, <1s subsequent calls
-- **Size**: ~2.5GB (Q6_K offers excellent quality/size balance)
-
-### 2. Delivery Photo Analysis
-- **Model**: BLIP (Salesforce vision-language)
-- **Features**:
-  - Automatic photo captioning
-  - Legitimacy detection (0-100% confidence)
-  - Suspicious photo flagging
-  - GPS coordinate extraction from EXIF
-  - Image quality validation
-  - Device metadata extraction
-
-### 3. AI Insights & Analytics
-- **Personalized summaries** for couriers, restaurants, and admins
-- **24-hour caching** to reduce model calls
-- **Asynchronous loading** - pages render instantly, AI loads in background
-- **Performance metrics** and actionable recommendations
+| Role | Username | Password |
+|------|----------|----------|
+| Admin | `admin` | `admin123` |
+| Restaurant | `pizza_palace` | `rest123` |
+| Restaurant | `burger_king` | `rest123` |
+| Courier | `john_courier` | `courier123` |
+| Courier | `jane_courier` | `courier123` |
+| Courier | `mike_courier` | `courier123` |
 
 ## Project Structure
 
 ```
 courier-system/
-├── app.py                      # Main Flask application
-├── models.py                   # Database models (User, Order, etc.)
-├── config.py                   # Configuration
-├── requirements.txt            # Dependencies
-├── setup.py                    # Automated setup wizard
-├── run.bat                     # Windows quick start
-├── models/
-│   └── llama-3.2-3b.gguf      # Llama 3.2-3B Q6_K (~2.5GB) - not in Git
+├── app.py                  # Factory — ~65 LoC, no business logic
+├── config.py               # Config class (env-driven)
+├── extensions.py           # Shared extension instances (socketio, db, login, …)
+├── models.py               # SQLAlchemy models
+├── docker-compose.yml      # 3 services: web, db, ollama
+├── Dockerfile              # ~335 MB final image (no torch/transformers)
+├── docker-entrypoint.sh    # DB wait, migrate, seed, start app
+├── requirements.txt
+├── pytest.ini
+├── blueprints/             # Role-based route modules
+│   ├── auth.py             # /, /login, /logout, /dashboard
+│   ├── admin.py            # /admin/* + /api/admin/*
+│   ├── restaurant.py       # /restaurant/* + /api/restaurant/*
+│   ├── courier.py          # /courier/* + /api/courier/*
+│   ├── notifications.py    # /notifications
+│   ├── sockets.py          # @socketio.on event handlers
+│   ├── errors.py           # 404/500
+│   └── cli.py              # flask init-db, seed-db, seed-enhanced
+├── common/
+│   ├── decorators.py       # role_required
+│   ├── utils.py            # utcnow, allowed_file
+│   ├── logging_config.py   # Structured logger setup
+│   └── background.py       # Gevent greenlets (AI, auto-transitions)
 ├── services/
-│   ├── llm_service.py         # Thread-safe LLM wrapper
-│   ├── image_analyzer.py      # Vision AI + GPS/quality checks
-│   ├── ai_statistics.py       # AI insights generation
-│   └── assignment_algorithm.py # Courier assignment
+│   ├── llm_service.py      # Ollama HTTP client for text
+│   ├── image_analyzer.py   # EXIF/GPS + Ollama multimodal
+│   ├── ai_statistics.py    # Per-user insights generator
+│   ├── assignment_algorithm.py
+│   ├── socketio_service.py
+│   ├── geocoding_service.py
+│   ├── distance_calculator.py
+│   └── order_scheduler.py  # APScheduler auto-assign
 ├── templates/
-│   ├── admin/                 # Admin dashboard, analytics, user mgmt
-│   ├── restaurant/            # Order creation, tracking
-│   ├── courier/               # Delivery management
-│   └── components/            # Reusable UI components
-└── static/
-    ├── uploads/               # Delivery proof photos
-    └── js/                    # Frontend scripts
+│   ├── admin/ restaurant/ courier/
+│   ├── components/         # Reusable Jinja macros
+│   └── errors/
+├── static/js/              # Leaflet + Socket.IO client
+├── tests/                  # Pytest smoke suite (22 tests)
+└── migrations/             # Alembic version tree
+```
+
+## Testing
+
+```bash
+pytest                              # native venv
+docker compose exec web pytest      # inside container
+```
+
+22 smoke tests cover auth flow, role gating, and every major route.
+
+## Migrations
+
+Make a schema change? Generate + apply:
+
+```bash
+docker compose exec web python -m flask db migrate -m "add whatever"
+docker compose exec web python -m flask db upgrade
 ```
 
 ## How It Works
 
-### Order Flow
-1. **Restaurant** creates order with customer details
-2. **System** assigns available courier automatically
-3. **Courier** picks up order → Auto-transitions to "in transit" after 3s
-4. **Courier** delivers and uploads proof photo
-5. **AI** analyzes photo for legitimacy
+### Order flow
+1. Restaurant creates order → Ollama standardizes description in background
+2. Auto-assignment picks nearest available courier
+3. Courier marks picked up → system auto-transitions to *in transit* after 3 s (via gevent greenlet, no page reload needed)
+4. Courier uploads delivery proof → Moondream analyzes photo + checks match against order description
+5. Every state change is emitted over WebSocket to all interested parties
 
-### AI Processing
-- **Order descriptions**: Enhanced in background on order creation
-- **Photo analysis**: Triggered on delivery proof upload
-- **Insights**: Pre-generated on startup, cached for 24h
+### Real-time architecture
+- **Socket.IO rooms**: `admin`, `admin_{id}`, `restaurant_{id}`, `courier_{id}`, `order_{id}`
+- On connect: client receives unread notification count + last 20 notifications
+- State changes fan out to relevant rooms — no AJAX polling anywhere
 
-### Thread Safety
-- Models use locks to prevent concurrent access
-- Background threads for non-blocking operations
-- Connection pool management to prevent timeouts
+### AI pipeline
+- LLM + vision model **pre-warmed** in background at startup (first real call is instant)
+- 60 s availability cache — no hammering of Ollama
+- Graceful degradation — if Ollama is unreachable, AI features disable themselves; the rest of the app keeps working
+- Results persisted into the order row, so UI picks them up via a single `ai:description_ready` socket event
 
-## Database Models
+## Performance
 
-- **User** - Role-based auth (admin/restaurant/courier), location tracking
-- **Order** - Full delivery lifecycle with timestamps
-- **DeliveryLog** - Event logging for all order actions
-- **SavedCustomer** - Frequent delivery addresses
-- **AIStatisticsSummary** - Cached AI-generated insights
+| Metric | Before refactor | After |
+|--------|-----------------|-------|
+| Docker image size | ~7 GB (torch + transformers + GGUF) | **335 MB** |
+| Model inference | CPU only (~5–10 s / photo) | **GPU ~1 s / photo** (RTX 3050) |
+| App startup | Blocks on 2.5 GB model load | Instant — model loads in background |
+| `app.py` | 2000 lines monolith | ~65 lines (factory) |
+| Database | SQLite (dev only) | Postgres 16 (prod-ready) |
+| Schema mgmt | `db.create_all()` | Alembic migrations |
 
-## Performance Notes
-
-- **RAM**: ~4GB recommended (2.5GB model + overhead)
-- **Disk space**: ~3.5GB total (Llama 2.5GB + BLIP 990MB)
-- **First run**: Model loading ~5-10 seconds
-- **Subsequent**: <1 second per AI request
-- **Vision model**: Downloads automatically on first use (~990MB)
-- **CPU-only**: GPU acceleration not implemented
-
-## Development
-
-**Reset database:**
-```bash
-flask init-db && flask seed-db
-```
-
-**Clear AI cache:**
-Admin panel → "Force Clear AI Cache" button
-
-**Add test orders:**
-Seed data includes 100+ historical orders for testing analytics
+Tested on Ryzen 7 5800H, 16 GB RAM, RTX 3050 Laptop (4 GB VRAM). Both Qwen2.5 3B + Moondream fit in VRAM simultaneously (~3.8 GB used).
 
 ## Troubleshooting
 
-**"Llama model not found"**
-- Download: [Llama-3.2-3B-Instruct-Q6_K.gguf](https://huggingface.co/bartowski/Llama-3.2-3B-Instruct-GGUF/resolve/main/Llama-3.2-3B-Instruct-Q6_K.gguf) (~2.5GB)
-- Rename to `llama-3.2-3b.gguf`
-- Place in `models/` folder
+**Vision analysis keeps timing out**
+Cold start loads the model into VRAM (takes ~30 s). Warm-up runs on app start; if you restarted Ollama, give it a minute. Increase `OLLAMA_VISION_TIMEOUT` if needed.
 
-**"llama-cpp-python compilation failed"**
-- Install Visual C++ Build Tools (Windows)
-- Install `build-essential` (Linux)
+**"Ollama model not available"**
+Make sure you've pulled it: `docker compose exec ollama ollama pull qwen2.5:3b`
 
-**"Out of memory"**
-- Close other applications
-- AI models need ~4GB RAM
+**GPU not detected in Ollama container**
+Check `docker compose logs ollama` for the GPU discovery line. Windows: update NVIDIA driver + Docker Desktop. Linux: install NVIDIA Container Toolkit.
 
-**"Connection pool timeout"**
-- Restart application
-- Reduced by thread-safe model access
+**Postgres volume contains old data**
+`docker compose down -v` wipes all volumes (DB + sessions + uploads). Next `up` re-seeds from scratch.
 
-## Known Limitations
-
-- **Language**: BLIP is English-focused (Czech analysis less accurate)
-- **Performance**: CPU-only (no GPU acceleration)
-- **Scalability**: SQLite database (use PostgreSQL for production)
-
-## Future Enhancements
-
-- GPU acceleration for faster inference
-- Real-time GPS tracking
-- Push notifications
-- Advanced route optimization ML
-- Mobile app
-- Multi-language vision support
-
-## Production Deployment
-
-**⚠ Not recommended for production** - This is an educational project.
-
-For production use:
-- Use PostgreSQL instead of SQLite
-- Implement GPU acceleration
-- Add rate limiting
-- Use production WSGI server (Gunicorn)
-- Configure HTTPS
-- Set strong SECRET_KEY
+**CSRF errors on POST**
+Every form needs `<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">`. Set `WTF_CSRF_ENABLED=false` only in tests.
 
 ## License
 
-MIT License - Free for educational and personal use
+MIT — free for educational and personal use.
 
 ## Author
 
-Student project - Semester work demonstrating AI integration in web applications
+Student project — extended across multiple semesters to explore AI integration, real-time systems, and modern deployment.
 
 ## Acknowledgments
 
-- **Llama 3.2-3B Instruct** by Meta AI
-- **Q6_K Quantization** by @bartowski on HuggingFace
-- **BLIP** by Salesforce Research
-- **llama-cpp-python** for efficient CPU inference
-- **Transformers** by HuggingFace
+- **Qwen2.5** by Alibaba — primary text model
+- **Moondream** by vikhyat — lightweight multimodal model
+- **Ollama** for the HTTP inference server
+- **Meta Llama 3.2** (early iterations used llama-cpp-python with GGUF)
