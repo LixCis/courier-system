@@ -125,11 +125,13 @@ document.addEventListener('DOMContentLoaded', () => {
         bell.addEventListener('click', (e) => {
             e.stopPropagation();
             dropdown.classList.toggle('hidden');
+            bell.setAttribute('aria-expanded', dropdown.classList.contains('hidden') ? 'false' : 'true');
         });
 
         document.addEventListener('click', (e) => {
             if (!dropdown.contains(e.target) && !bell.contains(e.target)) {
                 dropdown.classList.add('hidden');
+                bell.setAttribute('aria-expanded', 'false');
             }
         });
     }

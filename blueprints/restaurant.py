@@ -6,7 +6,7 @@ from flask import render_template, redirect, url_for, flash, request, jsonify, c
 from flask_login import current_user
 
 from models import db, User, Order, DeliveryLog, SavedCustomer
-from extensions import socketio, init_socketio_service
+from extensions import socketio, init_socketio_service, limiter
 from common.decorators import role_required
 from common.utils import utcnow
 from common.background import auto_transition_order_statuses, enhance_in_background
@@ -51,6 +51,7 @@ def register(app):
 
     @app.route('/api/restaurant/ai-insights')
     @role_required('restaurant')
+    @limiter.limit("10 per minute")
     def api_restaurant_ai_insights():
         from models import AIStatisticsSummary
         cached = AIStatisticsSummary.query.filter_by(
@@ -72,11 +73,13 @@ def register(app):
             Order.status.in_(['pending', 'assigned', 'picked_up', 'in_transit'])
         ).order_by(Order.created_at.desc()).all()
 
-        all_orders = Order.query.filter_by(restaurant_id=current_user.id).all()
-        total_orders = len(all_orders)
-        pending_orders = sum(1 for o in all_orders if o.status == 'pending')
-        active_orders = sum(1 for o in all_orders if o.status in ['assigned', 'picked_up', 'in_transit'])
-        completed_orders = sum(1 for o in all_orders if o.status == 'delivered')
+        # Use aggregate DB queries instead of fetching all and filtering in Python
+        total_orders = Order.query.filter_by(restaurant_id=current_user.id).count()
+        pending_orders = Order.query.filter_by(restaurant_id=current_user.id, status='pending').count()
+        active_orders = Order.query.filter_by(restaurant_id=current_user.id).filter(
+            Order.status.in_(['assigned', 'picked_up', 'in_transit'])
+        ).count()
+        completed_orders = Order.query.filter_by(restaurant_id=current_user.id, status='delivered').count()
 
         available_couriers = User.query.filter_by(role='courier', is_available=True, is_active=True).count()
 
@@ -135,52 +138,58 @@ def register(app):
                 flash('⚠️ Invalid GPS coordinates. Please select locations on the map.', 'error')
                 return render_template('restaurant/create_order.html', saved_customers=_saved())
 
-            order_number = f"ORD-{utcnow().strftime('%Y%m%d')}-{secrets.token_hex(4).upper()}"
-            items_description = request.form.get('items_description')
+            try:
+                order_number = f"ORD-{utcnow().strftime('%Y%m%d')}-{secrets.token_hex(4).upper()}"
+                items_description = request.form.get('items_description')
 
-            order = Order(
-                order_number=order_number, restaurant_id=current_user.id,
-                restaurant_name=current_user.full_name,
-                customer_name=customer_name, customer_phone=customer_phone,
-                delivery_address=delivery_address, pickup_address=pickup_address,
-                items_description=items_description, ai_enhanced_description=None,
-                special_instructions=request.form.get('special_instructions'),
-                order_value=float(request.form.get('order_value') or 0),
-                status='pending',
-                pickup_latitude=pickup_lat, pickup_longitude=pickup_lon,
-                delivery_latitude=delivery_lat, delivery_longitude=delivery_lon,
-            )
+                order = Order(
+                    order_number=order_number, restaurant_id=current_user.id,
+                    restaurant_name=current_user.full_name,
+                    customer_name=customer_name, customer_phone=customer_phone,
+                    delivery_address=delivery_address, pickup_address=pickup_address,
+                    items_description=items_description, ai_enhanced_description=None,
+                    special_instructions=request.form.get('special_instructions'),
+                    order_value=float(request.form.get('order_value') or 0),
+                    status='pending',
+                    pickup_latitude=pickup_lat, pickup_longitude=pickup_lon,
+                    delivery_latitude=delivery_lat, delivery_longitude=delivery_lon,
+                )
 
-            db.session.add(order)
-            db.session.flush()
+                db.session.add(order)
+                db.session.flush()
 
-            db.session.add(DeliveryLog(
-                order_id=order.id, event_type='order_created',
-                event_description=f'Order created by {current_user.full_name}',
-                new_status='pending', user_id=current_user.id, user_role='restaurant',
-                timestamp=utcnow(),
-            ))
-            db.session.commit()
+                db.session.add(DeliveryLog(
+                    order_id=order.id, event_type='order_created',
+                    event_description=f'Order created by {current_user.full_name}',
+                    new_status='pending', user_id=current_user.id, user_role='restaurant',
+                    timestamp=utcnow(),
+                ))
+                db.session.commit()
 
-            svc = init_socketio_service()
-            svc.emit_order_created(order)
+                svc = init_socketio_service()
+                svc.emit_order_created(order)
 
-            if items_description and items_description.strip():
-                socketio.start_background_task(enhance_in_background, current_app._get_current_object(), order.id, items_description)
+                if items_description and items_description.strip():
+                    socketio.start_background_task(enhance_in_background, current_app._get_current_object(), order.id, items_description)
 
-            success, message, courier = default_assignment_service.auto_assign_order(order)
-            if success:
-                svc.emit_order_assigned(order)
-                msg = f'Order {order.order_number} created and assigned to {courier.full_name}!'
-                if order.estimated_total_time:
-                    msg += f' Estimated delivery: {order.estimated_total_time} minutes'
-                    if order.estimated_pickup_time:
-                        msg += f' (pickup in ~{order.estimated_pickup_time} min, delivery in ~{order.estimated_delivery_time} min)'
-                flash(msg, 'success')
-            else:
-                flash(f'Order {order.order_number} created. {message}', 'warning')
+                success, message, courier = default_assignment_service.auto_assign_order(order)
+                if success:
+                    svc.emit_order_assigned(order)
+                    msg = f'Order {order.order_number} created and assigned to {courier.full_name}!'
+                    if order.estimated_total_time:
+                        msg += f' Estimated delivery: {order.estimated_total_time} minutes'
+                        if order.estimated_pickup_time:
+                            msg += f' (pickup in ~{order.estimated_pickup_time} min, delivery in ~{order.estimated_delivery_time} min)'
+                    flash(msg, 'success')
+                else:
+                    flash(f'Order {order.order_number} created. {message}', 'warning')
 
-            return redirect(url_for('restaurant_dashboard'))
+                return redirect(url_for('restaurant_dashboard'))
+            except Exception as e:
+                db.session.rollback()
+                logger.error(f"Error creating order: {e}")
+                flash(f'Error creating order: {e}', 'danger')
+                return render_template('restaurant/create_order.html', saved_customers=_saved())
 
         saved_customers = SavedCustomer.query.filter_by(restaurant_id=current_user.id).order_by(
             SavedCustomer.last_used_at.desc()
@@ -255,22 +264,28 @@ def register(app):
             return redirect(url_for('restaurant_view_order', order_id=order.id))
 
         if request.method == 'POST':
-            order.customer_name = request.form.get('customer_name')
-            order.customer_phone = request.form.get('customer_phone')
-            order.delivery_address = request.form.get('delivery_address')
-            order.pickup_address = request.form.get('pickup_address')
-            order.items_description = request.form.get('items_description')
-            order.special_instructions = request.form.get('special_instructions')
-            order.order_value = float(request.form.get('order_value') or 0)
+            try:
+                order.customer_name = request.form.get('customer_name')
+                order.customer_phone = request.form.get('customer_phone')
+                order.delivery_address = request.form.get('delivery_address')
+                order.pickup_address = request.form.get('pickup_address')
+                order.items_description = request.form.get('items_description')
+                order.special_instructions = request.form.get('special_instructions')
+                order.order_value = float(request.form.get('order_value') or 0)
 
-            db.session.add(DeliveryLog(
-                order_id=order.id, event_type='order_edited',
-                event_description=f'Order details updated by {current_user.full_name}',
-                user_id=current_user.id, user_role='restaurant',
-            ))
-            db.session.commit()
-            flash('Order updated successfully!', 'success')
-            return redirect(url_for('restaurant_view_order', order_id=order.id))
+                db.session.add(DeliveryLog(
+                    order_id=order.id, event_type='order_edited',
+                    event_description=f'Order details updated by {current_user.full_name}',
+                    user_id=current_user.id, user_role='restaurant',
+                ))
+                db.session.commit()
+                flash('Order updated successfully!', 'success')
+                return redirect(url_for('restaurant_view_order', order_id=order.id))
+            except Exception as e:
+                db.session.rollback()
+                logger.error(f"Error editing order {order_id}: {e}")
+                flash(f'Error updating order: {e}', 'danger')
+                return render_template('restaurant/edit_order.html', order=order)
         return render_template('restaurant/edit_order.html', order=order)
 
     @app.route('/restaurant/order/<int:order_id>/cancel', methods=['POST'])
@@ -284,26 +299,32 @@ def register(app):
             flash('Cannot cancel order after it has been picked up.', 'danger')
             return redirect(url_for('restaurant_view_order', order_id=order.id))
 
-        cancel_reason = request.form.get('cancel_reason', 'No reason provided')
-        old_status = order.status
-        order.status = 'cancelled'
+        try:
+            cancel_reason = request.form.get('cancel_reason', 'No reason provided')
+            old_status = order.status
+            order.status = 'cancelled'
 
-        if order.courier_id and order.status == 'assigned':
-            courier = db.session.get(User, order.courier_id)
-            if courier:
-                courier.is_available = True
+            if order.courier_id and old_status == 'assigned':
+                courier = db.session.get(User, order.courier_id)
+                if courier:
+                    courier.is_available = True
 
-        db.session.add(DeliveryLog(
-            order_id=order.id, event_type='order_cancelled',
-            event_description=f'Order cancelled by {current_user.full_name}. Reason: {cancel_reason}',
-            old_status=old_status, new_status='cancelled',
-            user_id=current_user.id, user_role='restaurant',
-        ))
-        db.session.commit()
-        init_socketio_service().emit_order_cancelled(order)
+            db.session.add(DeliveryLog(
+                order_id=order.id, event_type='order_cancelled',
+                event_description=f'Order cancelled by {current_user.full_name}. Reason: {cancel_reason}',
+                old_status=old_status, new_status='cancelled',
+                user_id=current_user.id, user_role='restaurant',
+            ))
+            db.session.commit()
+            init_socketio_service().emit_order_cancelled(order)
 
-        flash(f'Order {order.order_number} has been cancelled.', 'success')
-        return redirect(url_for('restaurant_dashboard'))
+            flash(f'Order {order.order_number} has been cancelled.', 'success')
+            return redirect(url_for('restaurant_dashboard'))
+        except Exception as e:
+            db.session.rollback()
+            logger.error(f"Error cancelling order {order_id}: {e}")
+            flash(f'Error cancelling order: {e}', 'danger')
+            return redirect(url_for('restaurant_view_order', order_id=order.id))
 
     @app.route('/restaurant/order/<int:order_id>/update-status', methods=['POST'])
     @role_required('restaurant')
@@ -313,23 +334,29 @@ def register(app):
             flash('You do not have permission to update this order.', 'danger')
             return redirect(url_for('restaurant_dashboard'))
 
-        new_status = request.form.get('status')
-        old_status = order.status
-        order.status = new_status
+        try:
+            new_status = request.form.get('status')
+            old_status = order.status
+            order.status = new_status
 
-        if new_status == 'picked_up' and not order.picked_up_at:
-            order.picked_up_at = utcnow()
-        elif new_status == 'in_transit' and not order.in_transit_at:
-            order.in_transit_at = utcnow()
+            if new_status == 'picked_up' and not order.picked_up_at:
+                order.picked_up_at = utcnow()
+            elif new_status == 'in_transit' and not order.in_transit_at:
+                order.in_transit_at = utcnow()
 
-        db.session.add(DeliveryLog(
-            order_id=order.id, event_type='status_change',
-            event_description=f'Status changed from {old_status} to {new_status} by {current_user.full_name}',
-            old_status=old_status, new_status=new_status,
-            user_id=current_user.id, user_role='restaurant',
-        ))
-        db.session.commit()
-        init_socketio_service().emit_order_status_changed(order, old_status, new_status)
+            db.session.add(DeliveryLog(
+                order_id=order.id, event_type='status_change',
+                event_description=f'Status changed from {old_status} to {new_status} by {current_user.full_name}',
+                old_status=old_status, new_status=new_status,
+                user_id=current_user.id, user_role='restaurant',
+            ))
+            db.session.commit()
+            init_socketio_service().emit_order_status_changed(order, old_status, new_status)
 
-        flash(f'Order status updated to {new_status}.', 'success')
-        return redirect(url_for('restaurant_view_order', order_id=order.id))
+            flash(f'Order status updated to {new_status}.', 'success')
+            return redirect(url_for('restaurant_view_order', order_id=order.id))
+        except Exception as e:
+            db.session.rollback()
+            logger.error(f"Error updating order status {order_id}: {e}")
+            flash(f'Error updating order status: {e}', 'danger')
+            return redirect(url_for('restaurant_view_order', order_id=order.id))

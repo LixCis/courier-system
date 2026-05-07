@@ -36,6 +36,38 @@
     <strong>Selected:</strong> <span id="{{ map_id }}_address_text"></span>
 </div>
 
+<!-- Geolocation error message -->
+<div id="{{ map_id }}_geo_error" class="hidden mb-4 p-3 bg-red-50 border border-red-200 rounded-md">
+    <p class="text-sm text-red-800">
+        <strong>Location access denied or unavailable.</strong> Please manually set your location by clicking on the map or using the search box.
+    </p>
+</div>
+
+<!-- Manual lat/lon/address inputs (fallback) -->
+<div id="{{ map_id }}_manual_inputs" class="hidden mb-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+    <p class="text-sm font-medium text-blue-900 mb-3">Enter location manually:</p>
+    <div class="grid grid-cols-2 gap-3">
+        <div>
+            <label class="block text-xs font-medium text-blue-900">Latitude</label>
+            <input type="text" id="{{ map_id }}_manual_lat" placeholder="e.g., 49.8209"
+                   class="w-full mt-1 px-2 py-1 text-sm border border-blue-300 rounded">
+        </div>
+        <div>
+            <label class="block text-xs font-medium text-blue-900">Longitude</label>
+            <input type="text" id="{{ map_id }}_manual_lon" placeholder="e.g., 18.2625"
+                   class="w-full mt-1 px-2 py-1 text-sm border border-blue-300 rounded">
+        </div>
+    </div>
+    <div class="mt-2">
+        <label class="block text-xs font-medium text-blue-900">Address (optional)</label>
+        <input type="text" id="{{ map_id }}_manual_address" placeholder="Street, City"
+               class="w-full mt-1 px-2 py-1 text-sm border border-blue-300 rounded">
+    </div>
+    <button type="button" id="{{ map_id }}_manual_submit" class="mt-2 w-full px-3 py-2 text-sm bg-blue-600 text-white rounded hover:bg-blue-700">
+        Set Location
+    </button>
+</div>
+
 <!-- Hidden fields to store coordinates and address -->
 <input type="hidden" id="{{ map_id }}_lat" name="{{ lat_field }}" value="{{ initial_lat }}" required>
 <input type="hidden" id="{{ map_id }}_lon" name="{{ lon_field }}" value="{{ initial_lon }}" required>
@@ -87,6 +119,9 @@
         // Show address display
         document.getElementById('{{ map_id }}_address_display').style.display = 'block';
         document.getElementById('{{ map_id }}_address_text').textContent = addressText || `Coordinates: ${lat.toFixed(4)}, ${lon.toFixed(4)}`;
+
+        // Hide manual inputs if visible
+        document.getElementById('{{ map_id }}_manual_inputs').classList.add('hidden');
 
         // Trigger change event for form validation
         document.getElementById('{{ map_id }}_lat').dispatchEvent(new Event('change'));
@@ -140,6 +175,49 @@
                 })
                 .catch(error => console.error('Search error:', error));
         }, 500); // Debounce search
+    });
+
+    // Geolocation: try to auto-fill on page load
+    if (navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition(
+            function(position) {
+                // Success: auto-update location
+                const lat = position.coords.latitude;
+                const lon = position.coords.longitude;
+                map.setView([lat, lon], 16);
+                updateLocation(lat, lon, `Current location (${lat.toFixed(4)}, ${lon.toFixed(4)})`);
+            },
+            function(error) {
+                // Error: show error message and reveal manual inputs
+                console.warn('Geolocation error:', error);
+                document.getElementById('{{ map_id }}_geo_error').classList.remove('hidden');
+                document.getElementById('{{ map_id }}_manual_inputs').classList.remove('hidden');
+            }
+        );
+    } else {
+        // Geolocation not supported
+        document.getElementById('{{ map_id }}_geo_error').classList.remove('hidden');
+        document.getElementById('{{ map_id }}_manual_inputs').classList.remove('hidden');
+    }
+
+    // Manual input handler
+    document.getElementById('{{ map_id }}_manual_submit').addEventListener('click', function() {
+        const manualLat = parseFloat(document.getElementById('{{ map_id }}_manual_lat').value);
+        const manualLon = parseFloat(document.getElementById('{{ map_id }}_manual_lon').value);
+        const manualAddr = document.getElementById('{{ map_id }}_manual_address').value;
+
+        if (isNaN(manualLat) || isNaN(manualLon)) {
+            alert('Please enter valid latitude and longitude values');
+            return;
+        }
+
+        if (manualLat < -90 || manualLat > 90 || manualLon < -180 || manualLon > 180) {
+            alert('Latitude must be between -90 and 90, longitude between -180 and 180');
+            return;
+        }
+
+        map.setView([manualLat, manualLon], 16);
+        updateLocation(manualLat, manualLon, manualAddr || `${manualLat.toFixed(4)}, ${manualLon.toFixed(4)}`);
     });
 })();
 </script>

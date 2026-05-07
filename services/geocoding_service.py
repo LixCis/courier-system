@@ -5,9 +5,12 @@ Converts street addresses to GPS coordinates using the free Nominatim API (OpenS
 Implements rate limiting and caching to comply with Nominatim's usage policy.
 """
 
+import logging
 from geopy.geocoders import Nominatim
 from geopy.exc import GeocoderTimedOut
 import time
+
+logger = logging.getLogger(__name__)
 
 
 class GeocodingService:
@@ -58,9 +61,9 @@ class GeocodingService:
                 return location.latitude, location.longitude
 
         except GeocoderTimedOut:
-            print(f"Geocoding timeout for '{address}'")
+            logger.warning(f"Geocoding timeout for '{address}'")
         except Exception as e:
-            print(f"Geocoding failed for '{address}': {e}")
+            logger.error(f"Geocoding failed for '{address}': {e}")
 
         return None, None
 
@@ -96,7 +99,7 @@ class GeocodingService:
             if lat:
                 order.pickup_latitude = lat
                 order.pickup_longitude = lon
-                print(f"Geocoded pickup address: {order.pickup_address} -> ({lat}, {lon})")
+                logger.debug(f"Geocoded pickup address: {order.pickup_address} -> ({lat}, {lon})")
 
         # Geocode delivery address if not already done (fallback for legacy/external data)
         if not order.delivery_latitude and order.delivery_address:
@@ -104,7 +107,7 @@ class GeocodingService:
             if lat:
                 order.delivery_latitude = lat
                 order.delivery_longitude = lon
-                print(f"Geocoded delivery address: {order.delivery_address} -> ({lat}, {lon})")
+                logger.debug(f"Geocoded delivery address: {order.delivery_address} -> ({lat}, {lon})")
 
         # Save to database
         db.session.commit()
@@ -140,8 +143,8 @@ class GeocodingService:
                 return location.address
 
         except GeocoderTimedOut:
-            print(f"Reverse geocoding timeout for ({latitude}, {longitude})")
+            logger.warning(f"Reverse geocoding timeout for ({latitude}, {longitude})")
         except Exception as e:
-            print(f"Reverse geocoding failed for ({latitude}, {longitude}): {e}")
+            logger.error(f"Reverse geocoding failed for ({latitude}, {longitude}): {e}")
 
         return None

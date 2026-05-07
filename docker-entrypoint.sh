@@ -27,12 +27,17 @@ else:
     raise SystemExit("[entrypoint] DB never became reachable")
 PY
 
-echo "[entrypoint] Ensuring tables exist..."
+echo "[entrypoint] Running database migrations..."
+export FLASK_APP=app:app
+python -m flask db upgrade || {
+    echo "[entrypoint] WARNING: Flask migrate failed, falling back to db.create_all()"
+}
+
+echo "[entrypoint] Checking for sample data..."
 python -c "
 from app import app
 from models import db, User
 with app.app_context():
-    db.create_all()
     if not User.query.first():
         print('[entrypoint] Empty DB detected — seeding sample data')
         import subprocess, sys

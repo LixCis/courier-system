@@ -24,6 +24,9 @@ def app():
         SQLALCHEMY_DATABASE_URI='sqlite:///:memory:',
     )
     with flask_app.app_context():
+        # Disable rate limiter for tests
+        from extensions import limiter
+        limiter.enabled = False
         db.create_all()
         _seed_minimal_users()
         yield flask_app
@@ -33,6 +36,10 @@ def app():
 
 @pytest.fixture()
 def client(app):
+    from extensions import limiter
+    # Reset rate limiter storage between tests and ensure it's disabled
+    limiter.reset()
+    limiter.enabled = False
     return app.test_client()
 
 

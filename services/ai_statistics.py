@@ -1,10 +1,13 @@
 """
 AI Statistics Service - Generates AI-powered insights with caching
 """
+import logging
 from datetime import datetime, timedelta
 from models import db, Order, User, DeliveryLog, AIStatisticsSummary
 from services.llm_service import llm_service  # Use global instance for thread safety
 from sqlalchemy import func
+
+logger = logging.getLogger(__name__)
 
 
 def get_or_generate_ai_summary(user_id=None, summary_type='courier_daily', force_refresh=False):
@@ -237,7 +240,7 @@ Personalized summary:"""
         summary = output['choices'][0]['text'].strip()
         return summary if summary else "AI summary generation failed."
     except Exception as e:
-        print(f"Error generating courier AI summary: {e}")
+        logger.error(f"Error generating courier AI summary: {e}")
         return f"Chyba při generování AI shrnutí: {str(e)}"
 
 
@@ -287,7 +290,7 @@ Your business insights:"""
         summary = output['choices'][0]['text'].strip()
         return summary if summary else "AI summary generation failed."
     except Exception as e:
-        print(f"Error generating restaurant AI summary: {e}")
+        logger.error(f"Error generating restaurant AI summary: {e}")
         return f"Chyba při generování AI shrnutí: {str(e)}"
 
 
@@ -338,7 +341,7 @@ Your system analysis:"""
         summary = output['choices'][0]['text'].strip()
         return summary if summary else "AI summary generation failed."
     except Exception as e:
-        print(f"Error generating admin AI summary: {e}")
+        logger.error(f"Error generating admin AI summary: {e}")
         return f"Chyba při generování AI shrnutí: {str(e)}"
 
 
@@ -366,7 +369,7 @@ def save_ai_summary_to_cache(user_id, summary_type, summary_text, stats_data):
         db.session.add(new_summary)
 
     db.session.commit()
-    print(f"AI summary cached: {summary_type} for user {user_id}")
+    logger.info(f"AI summary cached: {summary_type} for user {user_id}")
 
 
 def clear_all_ai_cache():
@@ -374,11 +377,11 @@ def clear_all_ai_cache():
     try:
         deleted_count = AIStatisticsSummary.query.delete()
         db.session.commit()
-        print(f"Cleared {deleted_count} AI summary cache entries")
+        logger.info(f"Cleared {deleted_count} AI summary cache entries")
         return deleted_count
     except Exception as e:
         db.session.rollback()
-        print(f"Error clearing AI cache: {e}")
+        logger.error(f"Error clearing AI cache: {e}")
         return 0
 
 

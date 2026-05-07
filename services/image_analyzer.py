@@ -59,8 +59,8 @@ def extract_gps_metadata(image_path: str) -> Dict:
             if tag == 'DateTime':
                 try:
                     result['image_timestamp'] = datetime.strptime(value, '%Y:%m:%d %H:%M:%S')
-                except:
-                    pass
+                except Exception as e:
+                    logger.warning(f"Failed to parse image timestamp: {e}")
             elif tag == 'Make':
                 result['camera_make'] = str(value).strip()
             elif tag == 'Model':
@@ -103,7 +103,8 @@ def _parse_gps_coords(gps_data: Dict) -> Tuple[Optional[float], Optional[float]]
             lon = -lon
 
         return lat, lon
-    except:
+    except Exception as e:
+        logger.warning(f"Failed to parse GPS coordinates: {e}")
         return None, None
 
 
@@ -210,7 +211,8 @@ def _calculate_blur_score(grayscale_image: Image.Image) -> float:
         stat = ImageStat.Stat(edges)
         blur_score = stat.stddev[0] * 10  # Scale to reasonable range
         return float(blur_score)
-    except:
+    except Exception as e:
+        logger.warning(f"Failed to calculate blur score: {e}")
         return 100.0
 
 
@@ -312,8 +314,16 @@ class VisionAnalyzer:
             with open(image_path, "rb") as f:
                 image_b64 = base64.b64encode(f.read()).decode("ascii")
 
-            order_line = (f"The customer ordered: {order_description}\n"
-                          if order_description else "")
+            # Sanitize order_description: strip control chars, truncate to 500 chars
+            sanitized_desc = order_description
+            if sanitized_desc:
+                # Remove control characters
+                sanitized_desc = ''.join(c for c in sanitized_desc if ord(c) >= 32 or c in '\t\n\r')
+                # Truncate to 500 chars
+                sanitized_desc = sanitized_desc[:500].strip()
+
+            order_line = (f"The customer ordered: {sanitized_desc}\n"
+                          if sanitized_desc else "")
 
             prompt = (
                 "You are verifying a delivery proof photo uploaded by a courier.\n"
@@ -427,11 +437,11 @@ def analyze_delivery_photo(image_path: str, order_description: str = None, use_a
 
     try:
         # Step 1: Extract GPS metadata
-        print(f"[Image Analysis] Extracting GPS metadata...")
+        logger.debug(f"[Image Analysis] Extracting GPS metadata...")
         result['gps'] = extract_gps_metadata(image_path)
 
         # Step 2: Check image quality
-        print(f"[Image Analysis] Checking image quality...")
+        logger.debug(f"[Image Analysis] Checking image quality...")
         result['quality'] = check_image_quality(image_path)
 
         if not result['quality']['is_acceptable']:
@@ -439,7 +449,7 @@ def analyze_delivery_photo(image_path: str, order_description: str = None, use_a
 
         # Step 3: AI Vision analysis
         if use_ai_vision:
-            print(f"[Image Analysis] Running AI vision analysis...")
+            logger.debug(f"[Image Analysis] Running AI vision analysis...")
             result['vision'] = _vision_analyzer.analyze_photo(image_path, order_description)
 
             if not result['vision']['is_legitimate']:
@@ -456,13 +466,13 @@ def analyze_delivery_photo(image_path: str, order_description: str = None, use_a
         # Generate summary
         result['summary'] = _generate_summary(result)
 
-        print(f"[Image Analysis] Complete: {result['summary']}")
+        logger.info(f"[Image Analysis] Complete: {result['summary']}")
 
     except Exception as e:
         result['success'] = False
         result['errors'].append(f'Analysis error: {str(e)}')
         result['summary'] = f'Failed: {str(e)}'
-        print(f"[Image Analysis] Error: {str(e)}")
+        logger.error(f"[Image Analysis] Error: {str(e)}")
 
     return result
 

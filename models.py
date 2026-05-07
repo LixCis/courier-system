@@ -55,7 +55,7 @@ class Order(db.Model):
     order_number = db.Column(db.String(50), unique=True, nullable=False)
 
     # Restaurant information
-    restaurant_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    restaurant_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False, index=True)
     restaurant_name = db.Column(db.String(120), nullable=False)
 
     # Delivery details
@@ -71,8 +71,8 @@ class Order(db.Model):
     order_value = db.Column(db.Float, default=0.0)
 
     # Assignment and status
-    courier_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
-    status = db.Column(db.String(20), default='pending')  # pending, assigned, picked_up, in_transit, delivered, cancelled
+    courier_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True, index=True)
+    status = db.Column(db.String(20), default='pending', index=True)  # pending, assigned, picked_up, in_transit, delivered, cancelled
     priority = db.Column(db.Integer, default=0)  # For future AI optimization
 
     # Delivery proof
@@ -89,7 +89,7 @@ class Order(db.Model):
     delivery_longitude = db.Column(db.Float)
 
     # Timestamps (critical for AI analysis)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False, index=True)
     assigned_at = db.Column(db.DateTime)
     picked_up_at = db.Column(db.DateTime)
     in_transit_at = db.Column(db.DateTime)
@@ -112,7 +112,7 @@ class DeliveryLog(db.Model):
     __tablename__ = 'delivery_logs'
 
     id = db.Column(db.Integer, primary_key=True)
-    order_id = db.Column(db.Integer, db.ForeignKey('orders.id'), nullable=False)
+    order_id = db.Column(db.Integer, db.ForeignKey('orders.id'), nullable=False, index=True)
 
     # Event tracking
     event_type = db.Column(db.String(50), nullable=False)  # status_change, location_update, note, etc.
@@ -121,7 +121,7 @@ class DeliveryLog(db.Model):
     new_status = db.Column(db.String(20))
 
     # Actor information
-    user_id = db.Column(db.Integer, db.ForeignKey('users.id'))
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), index=True)
     user_role = db.Column(db.String(20))
 
     # Location data (for future AI route optimization)

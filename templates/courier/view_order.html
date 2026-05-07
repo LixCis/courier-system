@@ -81,7 +81,7 @@
             {% if order.status == 'assigned' %}
             <!-- Mark as Picked Up Button -->
             <button onclick="updateStatus('picked_up')"
-                    class="w-full inline-flex justify-center items-center rounded-md border border-transparent bg-blue-600 px-6 py-3 text-base font-semibold text-white shadow-sm hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2">
+                    class="w-full inline-flex justify-center items-center rounded-md border border-transparent bg-blue-600 px-4 py-3 text-base font-semibold text-white shadow-sm hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 min-h-[44px]">
                 <svg class="h-5 w-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
                 </svg>
@@ -104,7 +104,7 @@
             {% elif order.status == 'picked_up' %}
             <!-- Mark as In Transit Button -->
             <button onclick="updateStatus('in_transit')"
-                    class="w-full inline-flex justify-center items-center rounded-md border border-transparent bg-indigo-600 px-6 py-3 text-base font-semibold text-white shadow-sm hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2">
+                    class="w-full inline-flex justify-center items-center rounded-md border border-transparent bg-indigo-600 px-4 py-3 text-base font-semibold text-white shadow-sm hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 min-h-[44px]">
                 <svg class="h-5 w-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7l5 5m0 0l-5 5m5-5H6" />
                 </svg>
@@ -113,7 +113,7 @@
 
             {% elif order.status == 'in_transit' %}
             <!-- Mark as Delivered Button with Photo Upload -->
-            <form action="{{ url_for('courier_update_order_status', order_id=order.id) }}" method="POST" enctype="multipart/form-data">
+            <form id="delivery-form" action="{{ url_for('courier_update_order_status', order_id=order.id) }}" method="POST" enctype="multipart/form-data">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                 <input type="hidden" name="status" value="delivered">
 
@@ -122,19 +122,54 @@
                     <label class="block text-sm font-medium text-green-900 mb-2">
                         Upload Delivery Proof Photo (Optional)
                     </label>
-                    <input type="file" name="delivery_proof" accept="image/*" capture="environment"
+                    <input type="file" id="delivery-proof-input" name="delivery_proof" accept="image/*" capture="environment"
                            class="block w-full text-sm text-gray-900 border border-gray-300 rounded-lg cursor-pointer bg-white focus:outline-none">
                     <p class="mt-1 text-xs text-green-700">Take a photo of the delivered order</p>
+
+                    <!-- File preview and info -->
+                    <div id="file-preview-section" class="mt-3 hidden">
+                        <img id="preview-image" src="" alt="Preview" class="max-h-40 rounded-md mb-2">
+                        <p id="file-info" class="text-xs text-green-700"></p>
+                    </div>
                 </div>
 
-                <button type="submit"
-                        class="w-full inline-flex justify-center items-center rounded-md border border-transparent bg-green-600 px-6 py-4 text-lg font-bold text-white shadow-lg hover:bg-green-700 focus:outline-none focus:ring-4 focus:ring-green-500 focus:ring-offset-2">
-                    <svg class="h-6 w-6 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
-                    </svg>
-                    Mark as Delivered
-                </button>
+                <!-- Confirm and submit buttons -->
+                <div id="button-group" class="flex gap-3">
+                    <button type="submit"
+                            class="flex-1 inline-flex justify-center items-center rounded-md border border-transparent bg-green-600 px-4 py-3 text-base font-semibold text-white shadow-lg hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2 min-h-[44px]">
+                        <svg class="h-5 w-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+                        </svg>
+                        Mark as Delivered
+                    </button>
+                </div>
             </form>
+
+            <script>
+            (function() {
+                const fileInput = document.getElementById('delivery-proof-input');
+                const previewSection = document.getElementById('file-preview-section');
+                const previewImage = document.getElementById('preview-image');
+                const fileInfo = document.getElementById('file-info');
+
+                fileInput.addEventListener('change', function(e) {
+                    if (e.target.files.length > 0) {
+                        const file = e.target.files[0];
+                        const reader = new FileReader();
+
+                        reader.onload = function(event) {
+                            previewImage.src = event.target.result;
+                            const sizeKB = (file.size / 1024).toFixed(1);
+                            fileInfo.textContent = `File: ${file.name} | Size: ${sizeKB} KB`;
+                            previewSection.classList.remove('hidden');
+                        };
+                        reader.readAsDataURL(file);
+                    } else {
+                        previewSection.classList.add('hidden');
+                    }
+                });
+            })();
+            </script>
             {% endif %}
         </div>
         {% endif %}
@@ -214,15 +249,33 @@ function updateStatus(newStatus) {
         restaurant_name: '{{ order.restaurant_name|e }}',
         customer_name: '{{ order.customer_name|e }}'
     };
-    addOrderToMap(map, orderData, { routeColor: '#e11d48' });
+    addOrderToMap(map, orderData, { routeColor: '#e11d48', containerId: 'order-map' });
     {% endif %}
 
     socket.on('order:status_changed', (data) => {
         if (data.order_id === ORDER_ID) { window.location.reload(); }
     });
 
+    socket.on('delivery:photo_analyzed', (data) => {
+        if (data.order_id === ORDER_ID) {
+            // Image analysis is server-rendered (complex macro), simplest reliable refresh is reload
+            window.location.reload();
+        }
+    });
+
     socket.on('ai:description_ready', (data) => {
-        if (data.order_id === ORDER_ID) { window.location.reload(); }
+        if (data.order_id === ORDER_ID) {
+            // Update AI description panel without full reload
+            const aiLoadingDiv = document.getElementById('ai-loading');
+            const aiDescriptionDiv = document.getElementById('ai-description');
+            const aiDescriptionText = document.querySelector('#ai-description p');
+
+            if (aiDescriptionText && data.analysis) {
+                aiDescriptionText.textContent = data.analysis;
+                if (aiLoadingDiv) aiLoadingDiv.classList.add('hidden');
+                if (aiDescriptionDiv) aiDescriptionDiv.classList.remove('hidden');
+            }
+        }
     });
 
     window.addEventListener('beforeunload', () => {

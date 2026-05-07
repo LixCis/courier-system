@@ -66,12 +66,26 @@ function initMap(containerId, options = {}) {
  * @param {L.Map} map
  * @param {Array} start - [lat, lng]
  * @param {Array} end - [lat, lng]
- * @param {object} options - { color, weight, dashArray }
+ * @param {object} options - { color, weight, dashArray, containerId }
  * @returns {Promise<L.Polyline|null>}
  */
 async function drawRoute(map, start, end, options = {}) {
     const color = options.color || '#3b82f6';
     const weight = options.weight || 4;
+    const containerId = options.containerId;
+
+    // Show loading spinner if container provided
+    if (containerId) {
+        const container = document.getElementById(containerId);
+        if (container) {
+            const spinner = document.createElement('div');
+            spinner.id = `${containerId}-spinner`;
+            spinner.className = 'absolute inset-0 flex items-center justify-center bg-white bg-opacity-50 rounded-lg z-10';
+            spinner.innerHTML = '<svg class="animate-spin h-6 w-6 text-blue-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>';
+            container.style.position = 'relative';
+            container.appendChild(spinner);
+        }
+    }
 
     try {
         const url = `https://router.project-osrm.org/route/v1/driving/${start[1]},${start[0]};${end[1]},${end[0]}?overview=full&geometries=geojson`;
@@ -86,6 +100,12 @@ async function drawRoute(map, start, end, options = {}) {
                 opacity: 0.7,
                 dashArray: options.dashArray || null
             }).addTo(map);
+
+            // Remove spinner on success
+            if (containerId) {
+                const spinner = document.getElementById(`${containerId}-spinner`);
+                if (spinner) spinner.remove();
+            }
             return polyline;
         }
     } catch (e) {
@@ -99,7 +119,36 @@ async function drawRoute(map, start, end, options = {}) {
         opacity: 0.5,
         dashArray: '10, 10'
     }).addTo(map);
+
+    // Show error toast if container provided
+    if (containerId) {
+        const spinner = document.getElementById(`${containerId}-spinner`);
+        if (spinner) spinner.remove();
+        showRouteErrorToast();
+    }
     return polyline;
+}
+
+/**
+ * Show toast message when route unavailable
+ */
+function showRouteErrorToast() {
+    const container = document.getElementById('toast-container');
+    if (!container) return;
+
+    const toast = document.createElement('div');
+    toast.className = 'bg-yellow-50 border border-yellow-200 rounded-lg shadow-lg p-4 mb-2 max-w-sm animate-slide-in';
+    toast.innerHTML = `
+        <p class="text-sm font-medium text-yellow-800">Route unavailable</p>
+        <p class="text-xs text-yellow-700 mt-1">Showing direct line between locations</p>
+    `;
+    container.appendChild(toast);
+
+    setTimeout(() => {
+        toast.style.opacity = '0';
+        toast.style.transition = 'opacity 0.3s';
+        setTimeout(() => toast.remove(), 300);
+    }, 4000);
 }
 
 /**
@@ -133,7 +182,7 @@ async function addOrderToMap(map, order, options = {}) {
             map,
             [order.pickup_latitude, order.pickup_longitude],
             [order.delivery_latitude, order.delivery_longitude],
-            { color: options.routeColor || '#3b82f6' }
+            { color: options.routeColor || '#3b82f6', containerId: options.containerId }
         );
 
         // Fit map to show both markers

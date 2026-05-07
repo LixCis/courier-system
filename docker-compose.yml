@@ -18,6 +18,12 @@ services:
     volumes:
       - uploads:/app/static/uploads
       - sessions:/app/flask_session
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5000/login')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
     restart: unless-stopped
 
   db:
@@ -36,7 +42,7 @@ services:
     restart: unless-stopped
 
   ollama:
-    image: ollama/ollama:latest
+    image: ollama/ollama:0.21.0
     ports:
       - "11434:11434"
     volumes:

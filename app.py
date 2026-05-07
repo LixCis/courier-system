@@ -18,19 +18,23 @@ from flask import Flask
 
 from config import Config
 from models import db
-from extensions import login_manager, socketio, migrate, csrf, init_socketio_service
-from common.logging_config import configure_logging, get_logger
-
-configure_logging()
-logger = get_logger(__name__)
+from extensions import login_manager, socketio, migrate, csrf, limiter, init_socketio_service
+from common.logging_config import init_logging, get_logger
 
 
 def create_app():
     app = Flask(__name__)
     app.config.from_object(Config)
 
+    # Disable rate limiting in test environment
+    if app.config.get('TESTING'):
+        app.config['RATELIMIT_ENABLED'] = False
+
     app.jinja_env.globals.update(min=min, max=max)
     os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
+
+    # Initialize JSON logging with request_id tracking
+    init_logging(app)
 
     # Init extensions
     db.init_app(app)
@@ -38,7 +42,29 @@ def create_app():
     login_manager.init_app(app)
     socketio.init_app(app)
     csrf.init_app(app)
+    limiter.init_app(app)
     init_socketio_service()
+
+    # Security headers via Flask-Talisman
+    # TODO: Tighten 'unsafe-inline' in CSP after inline scripts are refactored
+    from flask_talisman import Talisman
+    Talisman(
+        app,
+        force_https=False,  # dev environment
+        session_cookie_http_only=True,
+        session_cookie_secure=False,  # dev environment
+        frame_options='DENY',
+        referrer_policy='strict-origin-when-cross-origin',
+        content_security_policy={
+            'default-src': "'self'",
+            'script-src': ["'self'", "'unsafe-inline'", "'unsafe-eval'", "https://cdn.tailwindcss.com", "https://cdn.jsdelivr.net", "https://cdnjs.cloudflare.com", "https://unpkg.com"],
+            'style-src': ["'self'", "'unsafe-inline'", "https://cdn.tailwindcss.com", "https://cdn.jsdelivr.net", "https://cdnjs.cloudflare.com", "https://unpkg.com", "https://fonts.googleapis.com"],
+            'img-src': ["'self'", "data:", "blob:", "https:"],
+            'connect-src': ["'self'", "ws:", "wss:", "https://router.project-osrm.org", "https://nominatim.openstreetmap.org", "https://cdn.tailwindcss.com", "https://cdn.jsdelivr.net", "https://cdnjs.cloudflare.com", "https://unpkg.com"],
+            'font-src': ["'self'", "https://fonts.gstatic.com", "data:"],
+            'frame-src': "'self'",
+        }
+    )
 
     # Order scheduler (background job that auto-assigns pending orders)
     from services.order_scheduler import init_scheduler

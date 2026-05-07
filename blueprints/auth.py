@@ -3,7 +3,7 @@ from flask import render_template, redirect, url_for, flash, request
 from flask_login import login_user, logout_user, login_required, current_user
 
 from models import db, User
-from extensions import login_manager
+from extensions import login_manager, limiter
 from common.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -22,6 +22,7 @@ def register(app):
         return redirect(url_for('login'))
 
     @app.route('/login', methods=['GET', 'POST'])
+    @limiter.limit("5 per minute", methods=["POST"])
     def login():
         if current_user.is_authenticated:
             return redirect(url_for('dashboard'))

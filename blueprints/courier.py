@@ -7,15 +7,17 @@ from datetime import datetime
 from flask import render_template, redirect, url_for, flash, request, jsonify, current_app
 from flask_login import current_user
 from werkzeug.utils import secure_filename
+from PIL import Image
 
 from models import db, User, Order, DeliveryLog
-from extensions import socketio, init_socketio_service
+from extensions import socketio, init_socketio_service, limiter
 from common.decorators import role_required
 from common.utils import utcnow, allowed_file
 from common.background import (
     auto_transition_order_statuses,
     enhance_in_background,
     transition_to_in_transit_background,
+    analyze_delivery_photo_background,
 )
 from common.logging_config import get_logger
 
@@ -112,6 +114,7 @@ def register(app):
 
     @app.route('/api/courier/ai-insights')
     @role_required('courier')
+    @limiter.limit("10 per minute")
     def api_courier_ai_insights():
         from models import AIStatisticsSummary
         cached = AIStatisticsSummary.query.filter_by(
@@ -178,95 +181,100 @@ def register(app):
     @app.route('/courier/order/<int:order_id>/update', methods=['POST'])
     @role_required('courier')
     def courier_update_order_status(order_id):
-        order = Order.query.get_or_404(order_id)
-        if order.courier_id != current_user.id:
-            flash('You do not have permission to update this order.', 'danger')
-            return redirect(url_for('courier_dashboard'))
+        try:
+            order = Order.query.get_or_404(order_id)
+            if order.courier_id != current_user.id:
+                flash('You do not have permission to update this order.', 'danger')
+                return redirect(url_for('courier_dashboard'))
 
-        new_status = request.form.get('status')
-        old_status = order.status
+            new_status = request.form.get('status')
+            old_status = order.status
 
-        if 'delivery_proof' in request.files:
-            file = request.files['delivery_proof']
-            if file and file.filename and allowed_file(file.filename):
-                filename = secure_filename(
-                    f"{order.order_number}_{secrets.token_hex(4)}.{file.filename.rsplit('.', 1)[1].lower()}"
-                )
-                filepath = os.path.join(current_app.config['UPLOAD_FOLDER'], filename)
-                file.save(filepath)
-                order.delivery_proof_photo = filename
+            if 'delivery_proof' in request.files:
+                file = request.files['delivery_proof']
+                if file and file.filename and allowed_file(file.filename):
+                    # Validate image content with Pillow
+                    try:
+                        img = Image.open(file)
+                        img.verify()
+                        if img.format not in ('JPEG', 'PNG', 'WEBP'):
+                            flash('Delivery proof must be JPEG, PNG, or WEBP format.', 'danger')
+                            return redirect(url_for('courier_view_order', order_id=order.id))
+                        file.seek(0)  # Reset stream after verify
+                    except Exception:
+                        flash('Invalid image file or corrupted delivery proof.', 'danger')
+                        return redirect(url_for('courier_view_order', order_id=order.id))
 
-                try:
-                    from services.image_analyzer import analyze_delivery_photo, get_analysis_for_db
-                    order_desc = order.items_description or order.ai_enhanced_description
-                    analysis_result = analyze_delivery_photo(
-                        filepath, order_description=order_desc, use_ai_vision=True
+                    filename = secure_filename(
+                        f"{order.order_number}_{secrets.token_hex(4)}.{file.filename.rsplit('.', 1)[1].lower()}"
                     )
-                    order.delivery_proof_analysis = get_analysis_for_db(analysis_result)
-                except Exception as e:
-                    logger.warning(f"Image analysis error: {e}")
-                    order.delivery_proof_analysis = {
-                        'error': str(e),
-                        'gps_verified': False, 'gps_latitude': None, 'gps_longitude': None,
-                        'gps_note': 'Image processing failed',
-                        'image_timestamp': None, 'camera_make': None, 'camera_model': None,
-                        'quality_score': 0, 'quality_acceptable': True, 'quality_issues': [],
-                        'ai_description': 'Analysis unavailable', 'ai_confidence': 0,
-                        'ai_legitimate': True, 'ai_flags': [], 'ai_raw_answers': [],
-                        'summary': 'Image uploaded (processing failed)',
-                    }
+                    filepath = os.path.join(current_app.config['UPLOAD_FOLDER'], filename)
+                    file.save(filepath)
+                    order.delivery_proof_photo = filename
 
-                db.session.add(DeliveryLog(
-                    order_id=order.id, event_type='delivery_proof_uploaded',
-                    event_description=f'Delivery proof photo uploaded by {current_user.full_name}',
-                    user_id=current_user.id, user_role='courier',
-                ))
+                    # Start async photo analysis in background
+                    socketio.start_background_task(
+                        analyze_delivery_photo_background,
+                        current_app._get_current_object(), order.id, filepath,
+                        order.items_description or order.ai_enhanced_description
+                    )
 
-        order.status = new_status
-        if new_status == 'picked_up' and not order.picked_up_at:
-            order.picked_up_at = utcnow()
-        elif new_status == 'in_transit' and not order.in_transit_at:
-            order.in_transit_at = utcnow()
-        elif new_status == 'delivered' and not order.delivered_at:
-            order.delivered_at = utcnow()
-            current_user.successful_deliveries = (current_user.successful_deliveries or 0) + 1
-            current_user.total_deliveries = (current_user.total_deliveries or 0) + 1
+                    db.session.add(DeliveryLog(
+                        order_id=order.id, event_type='delivery_proof_uploaded',
+                        event_description=f'Delivery proof photo uploaded by {current_user.full_name}',
+                        user_id=current_user.id, user_role='courier',
+                    ))
 
-            if order.delivery_latitude and order.delivery_longitude:
-                current_user.last_known_latitude = order.delivery_latitude
-                current_user.last_known_longitude = order.delivery_longitude
+            order.status = new_status
+            if new_status == 'picked_up' and not order.picked_up_at:
+                order.picked_up_at = utcnow()
+            elif new_status == 'in_transit' and not order.in_transit_at:
+                order.in_transit_at = utcnow()
+            elif new_status == 'delivered' and not order.delivered_at:
+                order.delivered_at = utcnow()
+                current_user.successful_deliveries = (current_user.successful_deliveries or 0) + 1
+                current_user.total_deliveries = (current_user.total_deliveries or 0) + 1
 
-            if current_user.pending_unavailable:
-                remaining = Order.query.filter_by(courier_id=current_user.id).filter(
-                    Order.status.in_(['assigned', 'picked_up', 'in_transit']),
-                    Order.id != order.id,
-                ).count()
-                if remaining == 0:
-                    current_user.pending_unavailable = False
-                    flash('You have completed all active deliveries and are now marked as unavailable.', 'info')
-            else:
-                current_user.is_available = True
+                if order.delivery_latitude and order.delivery_longitude:
+                    current_user.last_known_latitude = order.delivery_latitude
+                    current_user.last_known_longitude = order.delivery_longitude
 
-        db.session.add(DeliveryLog(
-            order_id=order.id, event_type='status_change',
-            event_description=f'Status changed from {old_status} to {new_status}',
-            old_status=old_status, new_status=new_status,
-            user_id=current_user.id, user_role='courier', timestamp=utcnow(),
-        ))
-        db.session.commit()
+                if current_user.pending_unavailable:
+                    remaining = Order.query.filter_by(courier_id=current_user.id).filter(
+                        Order.status.in_(['assigned', 'picked_up', 'in_transit']),
+                        Order.id != order.id,
+                    ).count()
+                    if remaining == 0:
+                        current_user.pending_unavailable = False
+                        flash('You have completed all active deliveries and are now marked as unavailable.', 'info')
+                else:
+                    current_user.is_available = True
 
-        svc = init_socketio_service()
-        svc.emit_order_status_changed(order, old_status, new_status)
-        if new_status == 'delivered':
-            svc.emit_courier_availability(current_user)
+            db.session.add(DeliveryLog(
+                order_id=order.id, event_type='status_change',
+                event_description=f'Status changed from {old_status} to {new_status}',
+                old_status=old_status, new_status=new_status,
+                user_id=current_user.id, user_role='courier', timestamp=utcnow(),
+            ))
+            db.session.commit()
 
-        if new_status == 'picked_up':
-            socketio.start_background_task(
-                transition_to_in_transit_background, order.id, current_app._get_current_object()
-            )
+            svc = init_socketio_service()
+            svc.emit_order_status_changed(order, old_status, new_status)
+            if new_status == 'delivered':
+                svc.emit_courier_availability(current_user)
 
-        flash(f'Order status updated to {new_status}.', 'success')
-        return redirect(url_for('courier_view_order', order_id=order.id))
+            if new_status == 'picked_up':
+                socketio.start_background_task(
+                    transition_to_in_transit_background, order.id, current_app._get_current_object()
+                )
+
+            flash(f'Order status updated to {new_status}.', 'success')
+            return redirect(url_for('courier_view_order', order_id=order.id))
+        except Exception as e:
+            db.session.rollback()
+            logger.error(f"Error updating order status {order_id}: {e}")
+            flash(f'Error updating order status: {e}', 'danger')
+            return redirect(url_for('courier_view_order', order_id=order_id))
 
     @app.route('/courier/orders/history')
     @role_required('courier')

@@ -227,6 +227,16 @@ class SocketIOService:
         }
         self.socketio.emit('courier:availability_changed', payload, room='admin', namespace='/')
 
+    def emit_delivery_photo_analyzed(self, order):
+        """Emit when delivery photo image analysis is ready for an order."""
+        payload = {
+            'order_id': order.id,
+        }
+        self.socketio.emit('delivery:photo_analyzed', payload, room=f'order_{order.id}', namespace='/')
+        self.socketio.emit('delivery:photo_analyzed', payload, room=f'restaurant_{order.restaurant_id}', namespace='/')
+        if order.courier_id:
+            self.socketio.emit('delivery:photo_analyzed', payload, room=f'courier_{order.courier_id}', namespace='/')
+
     def emit_ai_description_ready(self, order):
         """Emit when AI description is ready for an order."""
         payload = {

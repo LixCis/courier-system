@@ -8,8 +8,11 @@ Current Implementation: Simple First-Available Strategy
 Future: Can be replaced with ML-based optimization
 """
 
+import logging
 from models import User, Order, DeliveryLog, db
 from datetime import datetime
+
+logger = logging.getLogger(__name__)
 
 
 class AssignmentStrategy:
@@ -187,7 +190,7 @@ class DistanceBasedStrategy(AssignmentStrategy):
 
         # If geocoding failed, fall back to first available
         if not order.pickup_latitude:
-            print("Geocoding failed, using first available courier")
+            logger.warning("Geocoding failed, using first available courier")
             return available[0]
 
         # Find closest courier based on distance with rejection penalty
@@ -223,10 +226,10 @@ class DistanceBasedStrategy(AssignmentStrategy):
 
         # If no courier has location data, use first available
         if not best_courier:
-            print("No courier location data available, using first available")
+            logger.warning("No courier location data available, using first available")
             return available[0]
 
-        print(f"Assigned to {best_courier.full_name} (distance: {min_weighted_distance:.2f} km weighted)")
+        logger.info(f"Assigned to {best_courier.full_name} (distance: {min_weighted_distance:.2f} km weighted)")
         return best_courier
 
     def _calculate_rejection_penalty(self, courier):
@@ -331,7 +334,7 @@ class AssignmentService:
         # If no courier found and we have exclusions, try without exclusions
         # (This handles case when all couriers rejected but timeout expired or no one else available)
         if not courier and excluded_couriers:
-            print(f"No courier found with exclusions, trying without timeout restrictions...")
+            logger.warning(f"No courier found with exclusions, trying without timeout restrictions...")
             courier = self.strategy.assign_courier(order, excluded_courier_ids=[exclude_courier_id] if exclude_courier_id else [])
 
         if not courier:

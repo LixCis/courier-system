@@ -19,7 +19,7 @@ class LLMService:
     Service for standardizing order descriptions using Ollama HTTP API
 
     Connects to a remote Ollama instance via HTTP. Availability is cached
-    for 60 seconds to avoid hammering the server with ping requests.
+    for 300 seconds (5 minutes) to avoid hammering the server with ping requests.
     """
 
     def __init__(self):
@@ -35,7 +35,7 @@ class LLMService:
 
         self._available = None  # Cached availability (None = not checked yet)
         self._availability_check_time = None  # When we last checked
-        self._availability_cache_ttl = 60  # Cache for 60 seconds
+        self._availability_cache_ttl = 300  # Cache for 300 seconds (5 minutes)
         self._lock = threading.Lock()  # Thread safety
 
     def _check_available(self):
@@ -81,7 +81,7 @@ class LLMService:
 
     def is_available(self):
         """
-        Check if LLM service is available (with 60s cache)
+        Check if LLM service is available (with 300s cache)
 
         Returns:
             bool: True if Ollama is reachable and model exists, False otherwise

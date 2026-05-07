@@ -6,7 +6,7 @@ from flask import render_template, redirect, url_for, flash, request, jsonify, c
 from flask_login import current_user
 
 from models import db, User, Order, DeliveryLog
-from extensions import socketio, init_socketio_service
+from extensions import socketio, init_socketio_service, limiter
 from common.decorators import role_required
 from common.background import auto_transition_order_statuses, enhance_in_background, pregenerate_ai_insights
 from common.logging_config import get_logger
@@ -41,13 +41,22 @@ def register(app):
         )
 
         all_couriers = User.query.filter_by(role='courier', is_active=True).all()
+
+        # Aggregate active orders per courier to avoid N+1
+        from sqlalchemy import func
+        courier_orders = db.session.query(
+            Order.courier_id,
+            func.count(Order.id).label('active_orders_count')
+        ).filter(Order.status.in_(['assigned', 'picked_up', 'in_transit'])).group_by(
+            Order.courier_id
+        ).all()
+        orders_map = {courier_id: count for courier_id, count in courier_orders}
+
         couriers_json = json.dumps([{
             'id': c.id, 'name': c.full_name,
             'latitude': c.last_known_latitude, 'longitude': c.last_known_longitude,
             'is_available': c.is_available, 'vehicle_type': c.vehicle_type or 'bike',
-            'active_orders_count': Order.query.filter_by(courier_id=c.id).filter(
-                Order.status.in_(['assigned', 'picked_up', 'in_transit'])
-            ).count()
+            'active_orders_count': orders_map.get(c.id, 0)
         } for c in all_couriers])
 
         active_orders_list = Order.query.filter(
@@ -268,6 +277,7 @@ def register(app):
 
     @app.route('/api/admin/ai-insights')
     @role_required('admin')
+    @limiter.limit("10 per minute")
     def api_admin_ai_insights():
         from models import AIStatisticsSummary
         cached = AIStatisticsSummary.query.filter_by(user_id=None, summary_type='admin_system').first()

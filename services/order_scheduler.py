@@ -5,9 +5,12 @@ Background scheduler that periodically checks for pending orders
 and attempts to auto-assign them when couriers become available.
 """
 
+import logging
 from apscheduler.schedulers.background import BackgroundScheduler
 from models import Order, db
 from datetime import datetime
+
+logger = logging.getLogger(__name__)
 
 
 class OrderScheduler:
@@ -35,7 +38,7 @@ class OrderScheduler:
             name='Auto-assign pending orders',
             replace_existing=True
         )
-        print("Order scheduler started - checking pending orders every 30 seconds")
+        logger.info("Order scheduler started - checking pending orders every 30 seconds")
 
     def assign_pending_orders(self):
         """
@@ -54,7 +57,7 @@ class OrderScheduler:
                 if not pending_orders:
                     return
 
-                print(f"Found {len(pending_orders)} pending orders, attempting assignment...")
+                logger.info(f"Found {len(pending_orders)} pending orders, attempting assignment...")
 
                 from services.assignment_algorithm import default_assignment_service
 
@@ -65,29 +68,27 @@ class OrderScheduler:
 
                     if success:
                         assigned_count += 1
-                        print(f"✓ Order {order.order_number} assigned to {courier.full_name}")
+                        logger.info(f"Order {order.order_number} assigned to {courier.full_name}")
                         # Emit WebSocket event
                         try:
                             import app as app_module
                             if hasattr(app_module, 'socketio_service'):
                                 app_module.socketio_service.emit_order_assigned(order)
                         except Exception as e:
-                            print(f"[SocketIO] Error emitting order:assigned from scheduler: {e}")
+                            logger.warning(f"Error emitting order:assigned from scheduler: {e}")
                     else:
-                        print(f"✗ Order {order.order_number}: {message}")
+                        logger.warning(f"Order {order.order_number}: {message}")
 
                 if assigned_count > 0:
-                    print(f"Successfully assigned {assigned_count} pending orders")
+                    logger.info(f"Successfully assigned {assigned_count} pending orders")
 
             except Exception as e:
-                print(f"Error in scheduler: {e}")
-                import traceback
-                traceback.print_exc()
+                logger.error(f"Error in scheduler: {e}", exc_info=True)
 
     def shutdown(self):
         """Shutdown the scheduler gracefully"""
         self.scheduler.shutdown()
-        print("Order scheduler stopped")
+        logger.info("Order scheduler stopped")
 
 
 # Global scheduler instance

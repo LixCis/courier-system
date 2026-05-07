@@ -61,11 +61,19 @@ def auto_transition_order_statuses():
 
     Called from page-load routes (synchronously). Returns the set of order IDs
     that were transitioned in this call or within the last 1s (for UI sync).
+    Optimized: only scans orders recently marked as picked_up (within 10 minutes).
     """
-    picked_up_orders = Order.query.filter_by(status='picked_up').all()
+    from datetime import timedelta
+    now = utcnow()
+    recent_cutoff = now - timedelta(minutes=10)
+
+    # Only scan picked_up orders from the last 10 minutes to reduce DB load
+    picked_up_orders = Order.query.filter_by(status='picked_up').filter(
+        Order.picked_up_at >= recent_cutoff
+    ).all()
 
     if picked_up_orders:
-        logger.debug(f"Found {len(picked_up_orders)} orders with status 'picked_up'")
+        logger.debug(f"Found {len(picked_up_orders)} recent orders with status 'picked_up'")
 
     transitions_made = 0
     transitioned_order_ids = set()
@@ -101,15 +109,33 @@ def auto_transition_order_statuses():
                     logger.warning(f"SocketIO emit error for order {order.id}: {e}")
 
     # Catch orders transitioned within the last 1s (so UI reloads pick them up)
+    recent_transit_cutoff = now - timedelta(seconds=1)
     recent = Order.query.filter(
         Order.status == 'in_transit',
-        Order.in_transit_at.isnot(None)
+        Order.in_transit_at >= recent_transit_cutoff
     ).all()
     for order in recent:
-        if order.in_transit_at and (utcnow() - order.in_transit_at).total_seconds() <= 1:
-            transitioned_order_ids.add(order.id)
+        transitioned_order_ids.add(order.id)
 
     return transitioned_order_ids
+
+
+def analyze_delivery_photo_background(app, order_id, filepath, order_description):
+    """Analyze delivery photo in the background after upload."""
+    from services.image_analyzer import analyze_delivery_photo, get_analysis_for_db
+    with app.app_context():
+        try:
+            analysis_result = analyze_delivery_photo(
+                filepath, order_description=order_description, use_ai_vision=True
+            )
+            order = db.session.get(Order, order_id)
+            if order:
+                order.delivery_proof_analysis = get_analysis_for_db(analysis_result)
+                db.session.commit()
+                logger.info(f"Photo analysis complete for order {order.order_number}")
+                init_socketio_service().emit_delivery_photo_analyzed(order)
+        except Exception as e:
+            logger.warning(f"Error analyzing delivery photo for order {order_id}: {e}")
 
 
 def pregenerate_ai_insights(app):

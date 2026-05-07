@@ -7,6 +7,8 @@ from flask_login import LoginManager
 from flask_migrate import Migrate
 from flask_socketio import SocketIO
 from flask_wtf.csrf import CSRFProtect
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
 
 login_manager = LoginManager()
 login_manager.login_view = 'login'
@@ -15,6 +17,7 @@ login_manager.login_message = 'Please log in to access this page.'
 socketio = SocketIO(manage_session=False, async_mode='gevent', cors_allowed_origins="*")
 migrate = Migrate()
 csrf = CSRFProtect()
+limiter = Limiter(key_func=get_remote_address, default_limits=[], storage_uri="memory://")
 
 socketio_service = None
 
